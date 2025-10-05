@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Realtime Agent Chat</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <h2>Users</h2>
+        <ul id="users"></ul>
+      </aside>
+      <main id="main">
+        <header>
+          <input id="name" placeholder="Your name" />
+          <button id="joinBtn">Join</button>
+        </header>
+        <section id="messages"></section>
+        <form id="msgForm">
+          <input id="msgInput" autocomplete="off" placeholder="Type a message" />
+          <button>Send</button>
+        </form>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+  </body>
+</html>
