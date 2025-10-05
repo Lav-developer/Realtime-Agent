@@ -10,6 +10,13 @@ const msgInput = document.getElementById('msgInput');
 let joined = false;
 let me = null;
 
+// Request Notification permission early (graceful if blocked)
+if ('Notification' in window) {
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
+}
+
 function renderUsers(list){
   usersEl.innerHTML = '';
   list.forEach(u => {
@@ -50,18 +57,40 @@ msgForm.addEventListener('submit', (e) => {
 });
 
 socket.on('users-list', (list) => {
+  // list is an array of user objects
   renderUsers(list);
 });
 
 socket.on('user-joined', (user) => {
-  renderUsers(document.querySelectorAll('#users li') ? Array.from(document.querySelectorAll('#users li')).map(li => ({name:li.textContent})) : []);
+  // Show system message and desktop notification
   const systemMsg = { user: { name: 'System' }, text: `${user.name || 'A user'} joined` , ts: Date.now() };
   addMessage(systemMsg);
+  try {
+    if (Notification && Notification.permission === 'granted') {
+      new Notification('User joined', { body: `${user.name || 'A user'} joined the chat` });
+    }
+  } catch (e) {
+    // ignore notification errors in older browsers
+  }
 });
 
 socket.on('user-left', (user) => {
   const systemMsg = { user: { name: 'System' }, text: `${user?.name || 'A user'} left`, ts: Date.now() };
   addMessage(systemMsg);
+  try {
+    if (Notification && Notification.permission === 'granted') {
+      new Notification('User left', { body: `${user?.name || 'A user'} left the chat` });
+    }
+  } catch (e) {
+    // ignore
+  }
+});
+
+// Ack from server with full user object (includes assigned id)
+socket.on('joined', (user) => {
+  if (me) {
+    me.id = user.id;
+  }
 });
 
 socket.on('message', (payload) => {

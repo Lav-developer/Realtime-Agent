@@ -31,9 +31,18 @@ io.on('connection', (socket) => {
   console.log('a user connected', socket.id);
 
   socket.on('join', (user) => {
-    users.set(socket.id, user || { id: socket.id, name: 'Anonymous' });
-    socket.broadcast.emit('user-joined', users.get(socket.id));
-    io.to(socket.id).emit('users-list', Array.from(users.values()));
+    // Normalize user shape and store using socket.id as source of truth
+    const u = Object.assign({ id: socket.id, name: 'Anonymous' }, user || {});
+    users.set(socket.id, u);
+
+    // Notify other clients a user joined
+    socket.broadcast.emit('user-joined', u);
+
+    // Emit updated users list to ALL clients so everyone has a consistent view
+    io.emit('users-list', Array.from(users.values()));
+
+    // Acknowledge the joining socket with its assigned id and full user object
+    io.to(socket.id).emit('joined', u);
   });
 
   socket.on('message', (msg) => {
