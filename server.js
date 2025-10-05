@@ -51,6 +51,16 @@ io.on('connection', (socket) => {
     io.emit('message', payload);
   });
 
+  // Typing indicators (transient)
+  socket.on('typing', () => {
+    const user = users.get(socket.id) || { id: socket.id, name: 'Anonymous' };
+    socket.broadcast.emit('typing', user);
+  });
+
+  socket.on('stop-typing', () => {
+    socket.broadcast.emit('stop-typing');
+  });
+
   socket.on('disconnect', () => {
     const user = users.get(socket.id);
     users.delete(socket.id);

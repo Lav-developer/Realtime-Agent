@@ -14,10 +14,17 @@
       </aside>
       <main id="main">
         <header>
-          <input id="name" placeholder="Your name" />
-          <button id="joinBtn">Join</button>
+          <div id="identity">
+            <input id="name" placeholder="Your name" />
+            <button id="joinBtn">Join</button>
+            <span id="meName" class="me-name" hidden></span>
+            <label class="notif-toggle"><input type="checkbox" id="sysNotifToggle" /> System notifications</label>
+            <span id="unreadBadge" class="unread" hidden>0</span>
+          </div>
         </header>
         <section id="messages"></section>
+        <div id="typing" class="typing" aria-live="polite"></div>
+        <div id="toast-container" class="toast-container" aria-live="polite"></div>
         <form id="msgForm">
           <input id="msgInput" autocomplete="off" placeholder="Type a message" />
           <button>Send</button>
