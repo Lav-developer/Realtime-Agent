@@ -43,6 +43,11 @@ form button{padding:10px 14px;border-radius:10px;border:0;background:#0f1724;col
 	.notif-toggle{order:2;margin-left:0}
 	#meName{order:3}
 	#unreadBadge{order:4}
+	/* When joined, hide the name input and join button to avoid layout shift on mobile */
+	body.joined #identity input,
+	body.joined #identity button,
+	body.joined .notif-toggle{display:none}
+	body.joined #meName{display:inline-block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:65%}
 	form{position:sticky;bottom:0;background:linear-gradient(180deg,#fff, #f7fafc);padding:10px;border-top:1px solid #e6e6e6}
 	form input{font-size:16px;padding:12px}
 	form button{padding:12px 16px}

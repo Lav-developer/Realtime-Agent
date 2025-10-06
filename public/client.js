@@ -123,6 +123,8 @@ joinBtn.addEventListener('click', () => {
   socket.emit('join', me);
   joined = true;
   joinBtn.disabled = true;
+  // mark UI as joined so CSS can hide join inputs and show compact name
+  try { document.body.classList.add('joined'); } catch (e) {}
 });
 
 msgForm.addEventListener('submit', (e) => {
@@ -225,6 +227,7 @@ socket.on('joined', (user) => {
       unreadBadge.hidden = true;
       unreadBadge.textContent = '0';
     }
+    try { document.body.classList.add('joined'); } catch(e){}
   }
 });
 
