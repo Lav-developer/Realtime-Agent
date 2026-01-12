@@ -9,6 +9,15 @@
   <body>
     <div id="app">
       <aside id="sidebar">
+        <h2>Rooms</h2>
+        <div id="rooms-wrap">
+          <ul id="rooms"></ul>
+          <div class="room-create">
+            <input id="roomInput" placeholder="Create or join room" />
+            <button id="createRoomBtn">Go</button>
+          </div>
+        </div>
+        <hr />
         <h2>Users</h2>
         <ul id="users"></ul>
       </aside>
@@ -18,6 +27,7 @@
             <input id="name" placeholder="Your name" />
             <button id="joinBtn">Join</button>
             <span id="meName" class="me-name" hidden></span>
+            <span id="currentRoom" class="current-room" hidden></span>
             <label class="notif-toggle"><input type="checkbox" id="sysNotifToggle" /> System notifications</label>
             <span id="unreadBadge" class="unread" hidden>0</span>
           </div>
