@@ -817,8 +817,11 @@ function createRuntime(options = {}) {
       if (!user) return;
       const msg = messages.get(messageId);
       if (!msg) return;
-      const owner = msg.user && msg.user.id === user.id;
-      if (!owner && !isHost(user)) return;
+      const owner = !!(msg.user && String(msg.user.id) === String(user.id));
+      if (!owner && !isHost(user)) {
+        socket.emit('error-message', { message: 'Only the host can delete other people’s messages' });
+        return;
+      }
       msg.deleted = true;
       msg.text = '';
       msg.attachments = [];

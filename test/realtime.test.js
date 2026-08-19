@@ -221,6 +221,19 @@ test('only the author can edit; host can delete others', async () => {
   b.socket.close();
 });
 
+test('guest cannot delete another user’s message', async () => {
+  const a = await connect('OwnerA');
+  const b = await connect('GuestB');
+  a.socket.emit('message', { text: 'do not delete', room: 'General' });
+  const msg = await waitFor(() => b.messages.find((m) => m.text === 'do not delete'));
+  b.socket.emit('delete-message', { messageId: msg.id });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(!!runtime.internals.messages.get(msg.id).deleted, false);
+  await waitFor(() => b.errors.includes('Only the host can delete other people’s messages'));
+  a.socket.close();
+  b.socket.close();
+});
+
 test('guests cannot create rooms; host can', async () => {
   const guest = await connect('Guest');
   guest.socket.emit('create-room', { name: 'SecretLab' });

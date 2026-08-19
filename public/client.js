@@ -77,15 +77,21 @@
 
   function uid() {
     try {
-      let id = localStorage.getItem('agent.uid');
+      let id = sessionStorage.getItem('agent.uid');
       if (!id) {
         id = (crypto.randomUUID && crypto.randomUUID()) || `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-        localStorage.setItem('agent.uid', id);
+        sessionStorage.setItem('agent.uid', id);
       }
       return id;
     } catch {
       return `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     }
+  }
+
+  function canDeleteMessage(msg) {
+    if (!state.me?.id || !msg?.user?.id) return false;
+    if (String(msg.user.id) === String(state.me.id)) return true;
+    return state.me.role === 'host';
   }
 
   function savedName() {
@@ -548,7 +554,19 @@
           img.addEventListener('click', () => openLightbox(f.url, f.name));
           grid.appendChild(img);
         } else {
-          grid.appendChild(el('a', { class: 'file-chip', href: f.url, target: '_blank', rel: 'noopener' }, `${f.name || 'File'} · ${prettySize(f.size)}`));
+          const fileName = f.name || 'download';
+          const href = `/download/${encodeURIComponent(String(f.url || '').split('/').pop() || '')}?name=${encodeURIComponent(fileName)}`;
+          grid.appendChild(el(
+            'a',
+            {
+              class: 'file-chip',
+              href,
+              download: fileName,
+              rel: 'noopener',
+              title: `Download ${fileName}`,
+            },
+            `⬇ ${fileName}${f.size ? ` · ${prettySize(f.size)}` : ''}`
+          ));
         }
       });
       bubble.appendChild(grid);
@@ -590,7 +608,7 @@
     if (mine) {
       bar.appendChild(el('button', { type: 'button', title: 'Edit', onclick: () => beginEdit(msg) }, 'Edit'));
     }
-    if (mine || state.me?.role === 'host') {
+    if (canDeleteMessage(msg)) {
       bar.appendChild(el('button', { type: 'button', class: 'danger', title: 'Delete', onclick: () => askDelete(msg) }, 'Del'));
     }
     bar.appendChild(el('button', {
@@ -644,6 +662,10 @@
   }
 
   function askDelete(msg) {
+    if (!canDeleteMessage(msg)) {
+      toast('Only the host can delete other people’s messages');
+      return;
+    }
     openModal('confirmModal');
     const yes = $('confirmYes');
     const no = $('confirmNo');
