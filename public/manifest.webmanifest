@@ -1,0 +1,17 @@
+{
+  "name": "Realtime Agent",
+  "short_name": "Agent",
+  "description": "Live rooms, direct messages, and file sharing.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07080b",
+  "theme_color": "#07080b",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

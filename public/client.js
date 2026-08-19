@@ -1,659 +1,1005 @@
-const socket = io();
+(() => {
+  const PALETTE = ['#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#06b6d4'];
+  const EMOJIS = ['😀','😁','😂','😊','😍','🤩','😉','😎','🤔','🙌','👍','👎','❤️','🔥','🎉','😮','😢','😡','✨','✅','🚀','👀','💯','🤝'];
+  const QUICK_REACT = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
 
-const usersEl = document.getElementById('users');
-const messagesEl = document.getElementById('messages');
-const nameInput = document.getElementById('name');
-const joinBtn = document.getElementById('joinBtn');
-const msgForm = document.getElementById('msgForm');
-const msgInput = document.getElementById('msgInput');
+  const $ = (id) => document.getElementById(id);
+  const gate = $('gate');
+  const app = $('app');
+  const roomsEl = $('rooms');
+  const dmsEl = $('dms');
+  const usersEl = $('users');
+  const messagesEl = $('messages');
+  const typingEl = $('typing');
+  const toastRoot = $('toast-container');
+  const unreadBadge = $('unreadBadge');
+  const roomTitle = $('roomTitle');
+  const roomSub = $('roomSub');
+  const roomHash = $('roomHash');
+  const onlineLabel = $('onlineLabel');
+  const msgInput = $('msgInput');
+  const sendBtn = $('sendBtn');
+  const composer = $('composer');
+  const navSearch = $('navSearch');
+  const searchBar = $('searchBar');
+  const msgSearch = $('msgSearch');
+  const searchMeta = $('searchMeta');
+  const jumpLatest = $('jumpLatest');
+  const replyBar = $('replyBar');
+  const attachPreview = $('attachPreview');
+  const fileInput = $('fileInput');
+  const emojiPopover = $('emojiPopover');
+  const connBanner = $('connBanner');
+  const sidebar = $('sidebar');
+  const sidebarBackdrop = $('sidebarBackdrop');
 
-const meNameEl = document.getElementById('meName');
-const typingEl = document.getElementById('typing');
-const toastContainer = document.getElementById('toast-container');
-const unreadBadge = document.getElementById('unreadBadge');
-const sysNotifToggle = document.getElementById('sysNotifToggle');
-const roomsEl = document.getElementById('rooms');
-const roomInput = document.getElementById('roomInput');
-const createRoomBtn = document.getElementById('createRoomBtn');
-const currentRoomEl = document.getElementById('currentRoom');
+  const socket = io({ transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 600 });
 
-// Keep reference to current system desktop notification so we close it when a new one appears
-let currentSystemNotification = null;
-// Whether system desktop notifications (join/left) are enabled (persisted)
-let sysNotifEnabled = true;
-try {
-  const saved = localStorage.getItem('sysNotifEnabled');
-  if (saved !== null) sysNotifEnabled = saved === 'true';
-} catch (e) {}
-if (sysNotifToggle) {
-  sysNotifToggle.checked = sysNotifEnabled;
-  sysNotifToggle.addEventListener('change', (e) => {
-    sysNotifEnabled = !!e.target.checked;
-    try { localStorage.setItem('sysNotifEnabled', sysNotifEnabled ? 'true' : 'false'); } catch(e){}
-    // if user disabled system notifications, close any active system notification and toast
-    if (!sysNotifEnabled) {
-      try { if (currentSystemNotification && currentSystemNotification.close) currentSystemNotification.close(); currentSystemNotification = null; } catch(e){}
-      try { if (currentSystemToast) { currentSystemToast.remove(); currentSystemToast = null; } } catch(e){}
-    } else {
-      // if enabled and permission not granted, request it
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
-      }
+  const state = {
+    me: null,
+    joined: false,
+    room: null,
+    roomMeta: null,
+    roomLabel: '',
+    public: [],
+    dms: [],
+    users: [],
+    messages: [],
+    replyTo: null,
+    attachments: [],
+    hiddenUnread: 0,
+    filter: '',
+    query: '',
+    typers: new Map(),
+    prefs: loadPrefs(),
+    stickBottom: true,
+    lastSeen: 0,
+    newDividerId: null,
+  };
+
+  function loadPrefs() {
+    const defaults = { notif: true, sound: true, presence: true, theme: 'dark', color: null };
+    try {
+      return { ...defaults, ...JSON.parse(localStorage.getItem('agent.prefs') || '{}') };
+    } catch {
+      return defaults;
     }
-  });
-}
-
-let joined = false;
-let me = null;
-let currentRoom = null;
-// track recent touch interactions to avoid mouse emulation triggering hover
-let isTouchInteraction = false;
-
-// Request Notification permission early (graceful if blocked)
-if ('Notification' in window) {
-  if (Notification.permission === 'default') {
-    Notification.requestPermission().catch(() => {});
   }
-}
 
-function renderUsers(list){
-  usersEl.innerHTML = '';
-  list.forEach(u => {
-    const li = document.createElement('li');
-    li.dataset.userid = u.id;
-    const av = document.createElement('div');
-    av.className = 'avatar';
-    av.textContent = (u.name || u.id || 'U').slice(0,2).toUpperCase();
-    li.appendChild(av);
-    const span = document.createElement('span');
-    span.textContent = u.name || u.id;
-    if (u.id === me?.id) {
-      span.style.fontWeight = '700';
-      span.textContent += ' (you)';
-    }
-    li.appendChild(span);
-
-    // Direct message button
-    if (u.id !== me?.id) {
-      const btn = document.createElement('button');
-      btn.className = 'dm-btn';
-      btn.title = `Message ${u.name || u.id}`;
-      btn.textContent = 'Msg';
-      btn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        startDirectMessage(u.id, u.name || u.id);
-      });
-      li.appendChild(btn);
-      // also make clicking the row start DM for convenience
-      li.addEventListener('click', () => startDirectMessage(u.id, u.name || u.id));
-    }
-
-    usersEl.appendChild(li);
-  });
-}
-
-// Compute deterministic DM room name for two user ids
-function dmRoomName(a, b){
-  try {
-    const ids = [String(a || ''), String(b || '')].sort();
-    return `dm-${ids.join('-')}`;
-  } catch (e) { return `dm-${String(a)}-${String(b)}`; }
-}
-
-function startDirectMessage(userId, userName){
-  if (!userId) return;
-  // ensure we have a local id for me
-  const myId = me?.id || socket.id;
-  // request server to create a private DM and invite the peer
-  socket.emit('create-dm', userId);
-  if (currentRoomEl) {
-    currentRoomEl.textContent = `DM with ${userName || userId}`;
-    currentRoomEl.hidden = false;
+  function savePrefs() {
+    try { localStorage.setItem('agent.prefs', JSON.stringify(state.prefs)); } catch {}
   }
-}
 
-function renderRooms(list){
-  if (!roomsEl) return;
-  roomsEl.innerHTML = '';
-  (list || []).forEach(r => {
-    const li = document.createElement('li');
-    li.textContent = r;
-    li.tabIndex = 0;
-    if (r === currentRoom) li.classList.add('active');
-    li.addEventListener('click', () => joinRoom(r));
-    li.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') joinRoom(r); });
-    roomsEl.appendChild(li);
-  });
-}
-
-function joinRoom(roomName){
-  if (!roomName) return;
-  socket.emit('join-room', String(roomName));
-}
-
-function addMessage({user, text, ts}){
-  const isSystem = (user && user.name === 'System') || !user?.id;
-  // messageId and reactions may be passed in payload; default to null
-  const messageId = arguments[0].id || null;
-  const reactions = arguments[0].reactions || {};
-  const row = document.createElement('div');
-  row.className = 'msg-row';
-
-  const div = document.createElement('div');
-  div.className = 'msg';
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  meta.textContent = `${user?.name || 'System'} • ${new Date(ts).toLocaleTimeString()}`;
-  const body = document.createElement('div');
-  body.textContent = text;
-  div.appendChild(meta);
-  div.appendChild(body);
-
-  if (isSystem) {
-    // Centered compact system message: single-line 'Name joined • time'
-    row.classList.add('system');
-    row.style.justifyContent = 'center';
-    const compact = document.createElement('div');
-    compact.className = 'system-compact';
-    // try to extract action text (joined/left) from provided text if possible
-    const actionText = text || '';
-    const time = new Date(ts).toLocaleTimeString();
-    // If the system 'text' already contains the user's name and action (e.g. 'Lav joined'),
-    // show it directly with timestamp. Otherwise, fall back to user.name + actionText.
-    compact.textContent = `${actionText} • ${time}`.trim();
-    row.appendChild(compact);
-  } else {
-    const av = document.createElement('div');
-    av.className = 'avatar';
-    av.textContent = (user?.name || user?.id || 'U').slice(0,2).toUpperCase();
-
-    // Mark message as 'own' only if both sides have a defined id and they match
-    if (user?.id && me?.id && user.id === me.id) {
-      row.classList.add('own');
-      div.classList.add('own');
-      meta.classList.add('own');
-    }
-
-    row.appendChild(av);
-    row.appendChild(div);
-
-    // attach message id to row for later reaction updates
-    if (messageId) row.dataset.messageId = messageId;
-
-    // reactions container
-    const reactionsWrap = document.createElement('div');
-    reactionsWrap.className = 'reactions-wrap';
-    // render initial reactions
-    const reactionsEl = renderReactions(messageId, reactions);
-    reactionsWrap.appendChild(reactionsEl);
-
-    // reaction picker button (simple: hearts, thumbs up, laugh, and any emoji present in text)
-    const picker = document.createElement('div');
-    picker.className = 'reactions-picker';
-    const btn = document.createElement('button');
-    btn.className = 'reaction-btn';
-    // use a non-emoji affordance (avoid static emoji shown on every message)
-    btn.textContent = '⋯';
-    btn.title = 'React';
-    picker.appendChild(btn);
-
-    const pickerMenu = document.createElement('div');
-    pickerMenu.className = 'picker-menu';
-
-    // default emojis
-    const emojiList = ['👍','❤️','😂','👎','😮','😢'];
-    // include any emoji found in message text
-    const extraEmojis = extractEmojis(text);
-    extraEmojis.forEach(e => { if (!emojiList.includes(e)) emojiList.push(e); });
-
-    emojiList.forEach(e => {
-      const ebtn = document.createElement('button');
-      ebtn.className = 'reaction-emoji';
-      ebtn.style.fontSize = '18px';
-      ebtn.style.border = '0';
-      ebtn.style.background = 'transparent';
-      ebtn.style.cursor = 'pointer';
-      ebtn.textContent = e;
-      ebtn.addEventListener('click', () => {
-        // send reaction to server
-        socket.emit('reaction', { messageId, emoji: e });
-        // close picker
-        try { picker.classList.remove('show'); btn.setAttribute('aria-expanded', 'false'); } catch(e){}
-      });
-      pickerMenu.appendChild(ebtn);
-    });
-
-    // Accessibility attrs
-    btn.setAttribute('aria-haspopup', 'true');
-    btn.setAttribute('aria-expanded', 'false');
-    btn.setAttribute('type', 'button');
-    btn.tabIndex = 0;
-
-    // Interaction behavior:
-    // - hover (desktop) shows picker
-    // - long-press (touch) opens picker
-    // - short tap toggles picker
-    let longPressTimer = null;
-    const longPressMs = 500;
-
-    // show picker when hovering the entire message row on desktop
-    row.addEventListener('mouseenter', () => {
-      if (isTouchInteraction) return;
-      picker.classList.add('show');
-      btn.setAttribute('aria-expanded', 'true');
-    });
-    row.addEventListener('mouseleave', () => {
-      if (isTouchInteraction) return;
-      picker.classList.remove('show');
-      btn.setAttribute('aria-expanded', 'false');
-    });
-
-    // Touch: long-press to open, short tap toggles
-    // long-press on the message row for touch devices
-    row.addEventListener('touchstart', (ev) => {
-      isTouchInteraction = true;
-      longPressTimer = setTimeout(() => {
-        picker.classList.add('show');
-        btn.setAttribute('aria-expanded', 'true');
-        longPressTimer = null;
-      }, longPressMs);
-    }, { passive: true });
-
-    row.addEventListener('touchend', (ev) => {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-        // treat as tap -> toggle
-        if (picker.classList.contains('show')) {
-          picker.classList.remove('show');
-          btn.setAttribute('aria-expanded', 'false');
-        } else {
-          picker.classList.add('show');
-          btn.setAttribute('aria-expanded', 'true');
-        }
+  function uid() {
+    try {
+      let id = localStorage.getItem('agent.uid');
+      if (!id) {
+        id = (crypto.randomUUID && crypto.randomUUID()) || `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem('agent.uid', id);
       }
-      // avoid immediate mouse emulation
-      setTimeout(() => { isTouchInteraction = false; }, 700);
-    }, { passive: true });
+      return id;
+    } catch {
+      return `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+  }
 
-    row.addEventListener('touchmove', () => {
-      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-    }, { passive: true });
-    row.addEventListener('touchcancel', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
+  function savedName() {
+    try { return localStorage.getItem('agent.name') || ''; } catch { return ''; }
+  }
 
-    // Click fallback for mouse/keyboard (ignore if touch just happened)
-    btn.addEventListener('click', (ev) => {
-      if (isTouchInteraction) return;
-      ev.stopPropagation();
-      if (picker.classList.contains('show')) {
-        picker.classList.remove('show');
-        btn.setAttribute('aria-expanded', 'false');
+  function colorFromId(id) {
+    let h = 0;
+    const s = String(id || '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+
+  function initials(name) {
+    const parts = String(name || 'U').trim().split(/\s+/).slice(0, 2);
+    return parts.map((p) => p[0] || '').join('').toUpperCase() || 'U';
+  }
+
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') node.className = v;
+      else if (k === 'text') node.textContent = v;
+      else if (k === 'html') node.innerHTML = v;
+      else if (k === 'dataset') Object.assign(node.dataset, v);
+      else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+      else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+      else if (v === true) node.setAttribute(k, '');
+      else node.setAttribute(k, v);
+    }
+    for (const child of children.flat()) {
+      if (child == null || child === false) continue;
+      node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    }
+    return node;
+  }
+
+  function toast(text, ms = 2800) {
+    if (!toastRoot) return;
+    const t = el('div', { class: 'toast', text });
+    toastRoot.appendChild(t);
+    setTimeout(() => t.remove(), ms);
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#eef1f6' : '#07080b');
+    state.prefs.theme = theme === 'light' ? 'light' : 'dark';
+    savePrefs();
+  }
+
+  applyTheme(state.prefs.theme);
+
+  function beep() {
+    if (!state.prefs.sound) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.value = 0.04;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.07);
+      setTimeout(() => ctx.close(), 200);
+    } catch {}
+  }
+
+  function notify(title, body) {
+    if (!state.prefs.notif || document.visibilityState === 'visible') return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try { new Notification(title, { body, icon: 'favicon.svg' }); } catch {}
+  }
+
+  function formatTime(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function formatDay(ts) {
+    const d = new Date(ts);
+    const today = new Date();
+    const yday = new Date();
+    yday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === yday.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function sameDay(a, b) {
+    const da = new Date(a);
+    const db = new Date(b);
+    return da.toDateString() === db.toDateString();
+  }
+
+  function prettySize(n) {
+    if (!n) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function renderInline(parent, line) {
+    const names = state.users.map((u) => u.name).filter(Boolean).sort((a, b) => b.length - a.length);
+    const mention = names.length ? names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') : '';
+    const rx = new RegExp(`(\`[^\`]+\`|\\*\\*[^*]+\\*\\*|https?:\\/\\/[^\\s<]+${mention ? `|@(?:${mention})` : ''})`, 'g');
+    String(line).split(rx).forEach((part) => {
+      if (!part) return;
+      if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+        parent.appendChild(el('code', { class: 'inline-code', text: part.slice(1, -1) }));
+      } else if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+        parent.appendChild(el('strong', { text: part.slice(2, -2) }));
+      } else if (/^https?:\/\//.test(part)) {
+        parent.appendChild(el('a', { href: part, target: '_blank', rel: 'noopener noreferrer', text: part }));
+      } else if (part.startsWith('@') && names.includes(part.slice(1))) {
+        parent.appendChild(el('span', { class: 'mention', text: part }));
       } else {
-        picker.classList.add('show');
-        btn.setAttribute('aria-expanded', 'true');
+        parent.appendChild(document.createTextNode(part));
       }
     });
+  }
 
-    // keyboard support
-    btn.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault();
-        if (picker.classList.contains('show')) {
-          picker.classList.remove('show');
-          btn.setAttribute('aria-expanded', 'false');
+  function renderRich(text) {
+    const wrap = el('div', { class: 'body' });
+    const chunks = String(text || '').split(/```([\s\S]*?)```/g);
+    chunks.forEach((chunk, i) => {
+      if (i % 2 === 1) {
+        wrap.appendChild(el('pre', { class: 'pre-block' }, el('code', { text: chunk.replace(/^\n/, '') })));
+        return;
+      }
+      chunk.split('\n').forEach((line, li) => {
+        if (li) wrap.appendChild(el('br'));
+        renderInline(wrap, line);
+      });
+    });
+    return wrap;
+  }
+
+  function highlight(node, q) {
+    if (!q) return;
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const hits = [];
+    while (walker.nextNode()) hits.push(walker.currentNode);
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+    hits.forEach((textNode) => {
+      const src = textNode.nodeValue;
+      if (!rx.test(src)) return;
+      rx.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      src.replace(rx, (m, offset) => {
+        if (offset > last) frag.appendChild(document.createTextNode(src.slice(last, offset)));
+        frag.appendChild(el('mark', { class: 'hit', text: m }));
+        last = offset + m.length;
+        return m;
+      });
+      if (last < src.length) frag.appendChild(document.createTextNode(src.slice(last)));
+      textNode.parentNode.replaceChild(frag, textNode);
+    });
+  }
+
+  function openModal(id) { $(id).hidden = false; }
+  function closeModal(id) { $(id).hidden = true; }
+
+  document.querySelectorAll('[data-close]').forEach((btn) => {
+    btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));
+  });
+  document.querySelectorAll('.modal').forEach((m) => {
+    m.addEventListener('click', (e) => { if (e.target === m) m.hidden = true; });
+  });
+
+  function setSidebar(open) {
+    sidebar.classList.toggle('open', open);
+    sidebarBackdrop.hidden = !open;
+  }
+
+  $('menuBtn').addEventListener('click', () => setSidebar(true));
+  $('sidebarClose').addEventListener('click', () => setSidebar(false));
+  sidebarBackdrop.addEventListener('click', () => setSidebar(false));
+
+  function avatar(name, color, size) {
+    return el('span', {
+      class: `avatar${size ? ` ${size}` : ''}`,
+      text: initials(name),
+      style: { background: color || colorFromId(name) },
+    });
+  }
+
+  function matchesFilter(text) {
+    const q = state.filter.trim().toLowerCase();
+    if (!q) return true;
+    return String(text || '').toLowerCase().includes(q);
+  }
+
+  function renderNav() {
+    roomsEl.innerHTML = '';
+    dmsEl.innerHTML = '';
+    usersEl.innerHTML = '';
+
+    const rooms = state.public.filter((r) => matchesFilter(r.name + ' ' + (r.description || '')));
+    rooms.forEach((r) => {
+      const active = state.room === r.name;
+      const last = r.lastMessage ? `${r.lastMessage.userName}: ${r.lastMessage.text}` : r.description || 'No messages yet';
+      const li = el(
+        'li',
+        { class: active ? 'active' : '', role: 'button', tabindex: '0', onclick: () => joinRoom(r.name), onkeydown: navKey(() => joinRoom(r.name)) },
+        el('span', { class: 'hash', text: '#' }),
+        el('span', { class: 'name' }, el('span', { text: r.name }), el('span', { class: 'preview', text: last })),
+        el('span', { class: 'nav-meta' }, r.unread ? el('span', { class: 'unread-pill', text: String(r.unread) }) : null)
+      );
+      roomsEl.appendChild(li);
+    });
+    if (!rooms.length) roomsEl.appendChild(el('li', { style: { cursor: 'default', color: 'var(--faint)' }, text: 'No channels' }));
+
+    const dms = state.dms.filter((d) => matchesFilter(d.peer?.name));
+    dms.forEach((d) => {
+      const active = state.room === d.room;
+      const last = d.lastMessage ? d.lastMessage.text : 'Start a conversation';
+      const li = el(
+        'li',
+        { class: active ? 'active' : '', role: 'button', tabindex: '0', onclick: () => joinRoom(d.room), onkeydown: navKey(() => joinRoom(d.room)) },
+        avatar(d.peer.name, d.peer.color, 'sm'),
+        el('span', { class: 'name' }, el('span', { text: d.peer.name }), el('span', { class: 'preview', text: last })),
+        el('span', { class: 'nav-meta' }, d.unread ? el('span', { class: 'unread-pill', text: String(d.unread) }) : null)
+      );
+      dmsEl.appendChild(li);
+    });
+    if (!dms.length) dmsEl.appendChild(el('li', { style: { cursor: 'default', color: 'var(--faint)' }, text: 'Message someone online' }));
+
+    state.users.filter((u) => matchesFilter(u.name)).forEach((u) => {
+      const self = u.id === state.me?.id;
+      const li = el(
+        'li',
+        {
+          role: 'button',
+          tabindex: '0',
+          onclick: () => { if (!self) startDm(u.id); },
+          onkeydown: navKey(() => { if (!self) startDm(u.id); }),
+        },
+        avatar(u.name, u.color, 'sm'),
+        el('span', { class: 'name', text: self ? `${u.name} (you)` : u.name })
+      );
+      usersEl.appendChild(li);
+    });
+  }
+
+  function navKey(fn) {
+    return (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } };
+  }
+
+  function updateHeader() {
+    const isDm = state.roomMeta?.type === 'dm' || String(state.room || '').startsWith('dm-');
+    roomHash.textContent = isDm ? '✉' : '#';
+    roomTitle.textContent = (state.roomLabel || state.room || 'lobby').replace(/^#/, '');
+    if (isDm) roomSub.textContent = 'Private conversation';
+    else roomSub.textContent = state.roomMeta?.description || `${state.users.length} online`;
+    msgInput.placeholder = isDm ? `Message ${state.roomLabel || 'direct'}` : `Message #${(state.room || 'lobby').toLowerCase()}`;
+    const unread = [...state.public, ...state.dms.map((d) => ({ unread: d.unread }))].reduce((n, r) => n + (r.unread || 0), 0) + state.hiddenUnread;
+    if (unread > 0 && document.hidden) {
+      unreadBadge.hidden = false;
+      unreadBadge.textContent = String(unread);
+    } else if (!document.hidden) {
+      unreadBadge.hidden = true;
+    }
+    document.title = unread && document.hidden ? `(${unread}) Agent` : 'Agent · Realtime Chat';
+  }
+
+  function updateMeCard() {
+    if (!state.me) return;
+    $('meName').textContent = state.me.name;
+    const av = $('meAvatar');
+    av.textContent = initials(state.me.name);
+    av.style.background = state.me.color || colorFromId(state.me.id);
+  }
+
+  function nearBottom() {
+    return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 96;
+  }
+
+  function scrollToBottom(force) {
+    if (force || state.stickBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  messagesEl.addEventListener('scroll', () => {
+    state.stickBottom = nearBottom();
+    if (state.stickBottom) jumpLatest.hidden = true;
+  });
+
+  jumpLatest.addEventListener('click', () => {
+    state.stickBottom = true;
+    jumpLatest.hidden = true;
+    scrollToBottom(true);
+  });
+
+  function shouldGroup(prev, curr) {
+    if (!prev || !curr) return false;
+    if (curr.replyTo) return false;
+    if (prev.user?.id !== curr.user?.id) return false;
+    return curr.ts - prev.ts < 5 * 60 * 1000;
+  }
+
+  function renderMessages() {
+    const q = state.query.trim().toLowerCase();
+    const list = q
+      ? state.messages.filter((m) => `${m.text} ${m.user?.name || ''}`.toLowerCase().includes(q))
+      : state.messages;
+
+    messagesEl.innerHTML = '';
+    if (!list.length) {
+      const prompts = ['Hello everyone 👋', 'What are we working on today?', 'Quick standup?'];
+      messagesEl.appendChild(
+        el(
+          'div',
+          { class: 'empty-state' },
+          el('div', { class: 'mark', 'aria-hidden': 'true' }, el('span', { class: 'mark-ring' }), el('span', { class: 'mark-core' })),
+          el('h3', { text: q ? 'No matching messages' : 'Start the conversation' }),
+          el('p', { text: q ? 'Try a different search.' : 'Say hello, drop a file, or react once someone else writes.' }),
+          !q && el(
+            'div',
+            { class: 'prompt-row' },
+            prompts.map((p) => el('button', {
+              type: 'button',
+              class: 'prompt-chip',
+              onclick: () => { msgInput.value = p; msgInput.focus(); resizeComposer(); },
+            }, p))
+          )
+        )
+      );
+      if (searchMeta) searchMeta.textContent = q ? '0 results' : '';
+      return;
+    }
+
+    if (searchMeta) searchMeta.textContent = q ? `${list.length} result${list.length === 1 ? '' : 's'}` : '';
+
+    let dividerDrawn = false;
+    list.forEach((msg, i) => {
+      const prev = list[i - 1];
+      if (!prev || !sameDay(prev.ts, msg.ts)) {
+        messagesEl.appendChild(el('div', { class: 'date-chip', text: formatDay(msg.ts) }));
+      }
+      if (
+        !dividerDrawn &&
+        state.lastSeen &&
+        msg.ts > state.lastSeen &&
+        msg.user?.id !== state.me?.id
+      ) {
+        messagesEl.appendChild(el('div', { class: 'new-divider', text: 'New' }));
+        dividerDrawn = true;
+      }
+      messagesEl.appendChild(messageRow(msg, shouldGroup(prev, msg)));
+    });
+    scrollToBottom();
+  }
+
+  function messageRow(msg, grouped) {
+    const mine = msg.user?.id && state.me?.id && msg.user.id === state.me.id;
+    const row = el('div', {
+      class: `msg-row${mine ? ' own' : ''}${grouped ? ' grouped' : ''}`,
+      dataset: { messageId: msg.id },
+    });
+    row.appendChild(avatar(msg.user?.name, msg.user?.color || colorFromId(msg.user?.id), 'lg'));
+
+    const bubble = el('div', { class: 'bubble' });
+    const meta = el(
+      'div',
+      { class: 'meta' },
+      el('span', { class: 'who', text: msg.user?.name || 'Someone' }),
+      el('span', { class: 'when', text: formatTime(msg.ts), title: new Date(msg.ts).toLocaleString() }),
+      msg.edited ? el('span', { class: 'edited', text: 'edited' }) : null
+    );
+    bubble.appendChild(meta);
+
+    if (msg.replyTo) {
+      bubble.appendChild(
+        el(
+          'div',
+          { class: 'quote' },
+          el('div', { class: 'qn', text: msg.replyTo.userName || 'Reply' }),
+          el('div', { text: msg.replyTo.text || '' })
+        )
+      );
+    }
+
+    const body = renderRich(msg.text);
+    if (state.query) highlight(body, state.query);
+    bubble.appendChild(body);
+
+    if (msg.attachments?.length) {
+      const grid = el('div', { class: 'attach-grid' });
+      msg.attachments.forEach((f) => {
+        if ((f.type || '').startsWith('image/')) {
+          const img = el('img', { class: 'attach-img', src: f.url, alt: f.name || 'image' });
+          img.addEventListener('click', () => openLightbox(f.url, f.name));
+          grid.appendChild(img);
         } else {
-          picker.classList.add('show');
-          btn.setAttribute('aria-expanded', 'true');
+          grid.appendChild(el('a', { class: 'file-chip', href: f.url, target: '_blank', rel: 'noopener' }, `${f.name || 'File'} · ${prettySize(f.size)}`));
+        }
+      });
+      bubble.appendChild(grid);
+    }
+
+    bubble.appendChild(renderReactions(msg));
+    row.appendChild(bubble);
+    row.appendChild(toolbar(msg, mine));
+    return row;
+  }
+
+  function renderReactions(msg) {
+    const wrap = el('div', { class: 'reactions' });
+    Object.entries(msg.reactions || {}).forEach(([emoji, users]) => {
+      const you = (users || []).includes(state.me?.id);
+      wrap.appendChild(
+        el('button', {
+          class: `reaction${you ? ' you' : ''}`,
+          type: 'button',
+          onclick: () => socket.emit('reaction', { messageId: msg.id, emoji }),
+        }, `${emoji} `, el('span', { text: String((users || []).length) }))
+      );
+    });
+    if (!wrap.childElementCount) wrap.style.display = 'none';
+    return wrap;
+  }
+
+  function toolbar(msg, mine) {
+    const bar = el('div', { class: 'toolbar', onclick: (e) => e.stopPropagation() });
+    QUICK_REACT.slice(0, 3).forEach((e) => {
+      bar.appendChild(el('button', { type: 'button', title: `React ${e}`, onclick: () => socket.emit('reaction', { messageId: msg.id, emoji: e }) }, e));
+    });
+    bar.appendChild(el('button', { type: 'button', title: 'Reply', onclick: () => setReply(msg) }, '↩'));
+    if (mine) {
+      bar.appendChild(el('button', { type: 'button', title: 'Edit', onclick: () => beginEdit(msg) }, 'Edit'));
+      bar.appendChild(el('button', { type: 'button', class: 'danger', title: 'Delete', onclick: () => askDelete(msg) }, 'Del'));
+    }
+    bar.appendChild(el('button', {
+      type: 'button',
+      title: 'Copy',
+      onclick: async () => {
+        try { await navigator.clipboard.writeText(msg.text || ''); toast('Copied'); } catch { toast('Could not copy'); }
+      },
+    }, 'Copy'));
+    return bar;
+  }
+
+  function setReply(msg) {
+    state.replyTo = { id: msg.id, text: msg.text, userName: msg.user?.name };
+    replyBar.hidden = false;
+    $('replyName').textContent = msg.user?.name || 'message';
+    $('replyText').textContent = msg.text || 'Attachment';
+    msgInput.focus();
+  }
+
+  $('replyCancel').addEventListener('click', () => {
+    state.replyTo = null;
+    replyBar.hidden = true;
+  });
+
+  function beginEdit(msg) {
+    const row = messagesEl.querySelector(`[data-message-id="${msg.id}"]`);
+    if (!row) return;
+    const body = row.querySelector('.body');
+    if (!body) return;
+    const input = el('textarea', { class: 'edit-input' });
+    input.value = msg.text || '';
+    input.style.width = '100%';
+    input.style.minHeight = '64px';
+    input.style.marginTop = '6px';
+    body.replaceWith(input);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      if (save) socket.emit('edit-message', { messageId: msg.id, text: input.value.trim() });
+      else renderMessages();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  function askDelete(msg) {
+    openModal('confirmModal');
+    const yes = $('confirmYes');
+    const no = $('confirmNo');
+    const onYes = () => { socket.emit('delete-message', { messageId: msg.id }); cleanup(); };
+    const onNo = () => cleanup();
+    function cleanup() {
+      closeModal('confirmModal');
+      yes.removeEventListener('click', onYes);
+      no.removeEventListener('click', onNo);
+    }
+    yes.addEventListener('click', onYes);
+    no.addEventListener('click', onNo);
+  }
+
+  function openLightbox(src, alt) {
+    $('lightboxImg').src = src;
+    $('lightboxImg').alt = alt || '';
+    $('lightbox').hidden = false;
+  }
+  $('lightbox').addEventListener('click', () => { $('lightbox').hidden = true; });
+
+  function joinRoom(name) {
+    if (!name) return;
+    socket.emit('join-room', name);
+    try { localStorage.setItem('agent.room', name); } catch {}
+    setSidebar(false);
+  }
+
+  function startDm(userId) {
+    socket.emit('create-dm', userId);
+    setSidebar(false);
+  }
+
+  function enterWorkspace(name) {
+    const clean = String(name || '').trim().slice(0, 32);
+    if (!clean) return;
+    try { localStorage.setItem('agent.name', clean); } catch {}
+    const me = {
+      id: uid(),
+      name: clean,
+      color: state.prefs.color || colorFromId(uid()),
+      room: (() => { try { return localStorage.getItem('agent.room') || 'Lobby'; } catch { return 'Lobby'; } })(),
+    };
+    state.me = me;
+    socket.emit('join', me);
+    gate.hidden = true;
+    app.hidden = false;
+    msgInput.disabled = false;
+    sendBtn.disabled = false;
+    msgInput.focus();
+    if (state.prefs.notif && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }
+
+  $('gateForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    enterWorkspace($('gateName').value);
+  });
+
+  const remembered = savedName();
+  if (remembered) $('gateName').value = remembered;
+  $('gateName').focus();
+  try {
+    if (remembered && localStorage.getItem('agent.room')) enterWorkspace(remembered);
+  } catch {}
+
+  navSearch.addEventListener('input', () => {
+    state.filter = navSearch.value;
+    renderNav();
+  });
+
+  $('searchToggle').addEventListener('click', () => {
+    searchBar.hidden = !searchBar.hidden;
+    if (!searchBar.hidden) msgSearch.focus();
+    else {
+      state.query = '';
+      msgSearch.value = '';
+      renderMessages();
+    }
+  });
+  $('searchClose').addEventListener('click', () => {
+    searchBar.hidden = true;
+    state.query = '';
+    msgSearch.value = '';
+    renderMessages();
+  });
+  msgSearch.addEventListener('input', () => {
+    state.query = msgSearch.value;
+    renderMessages();
+  });
+
+  $('themeBtn').addEventListener('click', () => {
+    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  });
+
+  $('newRoomBtn').addEventListener('click', () => {
+    openModal('newRoomModal');
+    $('newRoomName').focus();
+  });
+  $('newRoomForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('newRoomName').value.trim();
+    const description = $('newRoomDesc').value.trim();
+    if (!name) return;
+    socket.emit('create-room', { name, description });
+    $('newRoomForm').reset();
+    closeModal('newRoomModal');
+  });
+
+  function paintColors(active) {
+    const box = $('colorChoices');
+    box.innerHTML = '';
+    PALETTE.forEach((c) => {
+      box.appendChild(el('button', {
+        type: 'button',
+        class: `swatch${c === active ? ' active' : ''}`,
+        style: { background: c },
+        onclick: () => {
+          state.prefs.color = c;
+          paintColors(c);
+        },
+      }));
+    });
+  }
+
+  function openSettings() {
+    if (state.me) $('setName').value = state.me.name;
+    $('setNotif').checked = !!state.prefs.notif;
+    $('setSound').checked = !!state.prefs.sound;
+    $('setPresence').checked = !!state.prefs.presence;
+    paintColors(state.prefs.color || state.me?.color || PALETTE[0]);
+    openModal('settingsModal');
+  }
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('meCard').addEventListener('click', openSettings);
+  $('settingsForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    state.prefs.notif = $('setNotif').checked;
+    state.prefs.sound = $('setSound').checked;
+    state.prefs.presence = $('setPresence').checked;
+    savePrefs();
+    const name = $('setName').value.trim();
+    if (name) {
+      try { localStorage.setItem('agent.name', name); } catch {}
+      socket.emit('profile', { name, color: state.prefs.color });
+    }
+    if (state.prefs.notif && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+    closeModal('settingsModal');
+    toast('Settings saved');
+  });
+
+  function resizeComposer() {
+    msgInput.style.height = 'auto';
+    msgInput.style.height = `${Math.min(msgInput.scrollHeight, 160)}px`;
+  }
+  msgInput.addEventListener('input', () => {
+    resizeComposer();
+    socket.emit('typing');
+    clearTimeout(msgInput._t);
+    msgInput._t = setTimeout(() => socket.emit('stop-typing'), 1100);
+  });
+
+  composer.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendCurrent();
+  });
+  msgInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendCurrent();
+    }
+  });
+
+  function sendCurrent() {
+    const text = msgInput.value.trim();
+    if (!text && !state.attachments.length) return;
+    if (!state.joined) return toast('Join the workspace first');
+    socket.emit('message', {
+      text,
+      room: state.room,
+      replyTo: state.replyTo,
+      attachments: state.attachments,
+    });
+    msgInput.value = '';
+    resizeComposer();
+    state.replyTo = null;
+    replyBar.hidden = true;
+    state.attachments = [];
+    attachPreview.hidden = true;
+    attachPreview.innerHTML = '';
+    socket.emit('stop-typing');
+    state.stickBottom = true;
+  }
+
+  async function uploadFile(file) {
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      const res = await fetch('/upload', { method: 'POST', body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      state.attachments = [data];
+      attachPreview.hidden = false;
+      attachPreview.innerHTML = '';
+      const label = el('div', {}, el('div', { class: 'chip-kicker', text: 'Attachment' }), el('div', { class: 'chip-text', text: `${data.name} · ${prettySize(data.size)}` }));
+      const rm = el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Remove attachment', onclick: () => { state.attachments = []; attachPreview.hidden = true; } }, '✕');
+      attachPreview.append(label, rm);
+      msgInput.focus();
+    } catch (err) {
+      toast(err.message || 'Upload failed');
+    }
+  }
+
+  $('attachBtn').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    uploadFile(file);
+  });
+
+  const dropOverlay = $('dropOverlay');
+  document.addEventListener('dragover', (e) => {
+    if (![...e.dataTransfer.types].includes('Files')) return;
+    e.preventDefault();
+    if (dropOverlay && !app.hidden) dropOverlay.hidden = false;
+  });
+  document.addEventListener('dragleave', (e) => {
+    if (!e.relatedTarget) {
+      if (dropOverlay) dropOverlay.hidden = true;
+    }
+  });
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (dropOverlay) dropOverlay.hidden = true;
+    const file = e.dataTransfer?.files?.[0];
+    if (file && !app.hidden) uploadFile(file);
+  });
+  document.addEventListener('paste', (e) => {
+    if (app.hidden) return;
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      uploadFile(item.getAsFile());
+    }
+  });
+
+  function placePopover() {
+    const btn = $('emojiToggle');
+    const r = btn.getBoundingClientRect();
+    emojiPopover.style.left = `${Math.max(12, r.right - 280)}px`;
+    emojiPopover.style.top = `${r.top - 220}px`;
+  }
+
+  emojiPopover.innerHTML = '';
+  EMOJIS.forEach((e) => {
+    emojiPopover.appendChild(el('button', {
+      type: 'button',
+      onclick: () => {
+        const start = msgInput.selectionStart || msgInput.value.length;
+        msgInput.value = msgInput.value.slice(0, start) + e + msgInput.value.slice(msgInput.selectionEnd || start);
+        msgInput.focus();
+        emojiPopover.hidden = true;
+        resizeComposer();
+      },
+    }, e));
+  });
+  $('emojiToggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    emojiPopover.hidden = !emojiPopover.hidden;
+    if (!emojiPopover.hidden) placePopover();
+  });
+  document.addEventListener('click', () => { emojiPopover.hidden = true; });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal').forEach((m) => { m.hidden = true; });
+      emojiPopover.hidden = true;
+      $('lightbox').hidden = true;
+      setSidebar(false);
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      navSearch.focus();
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !e.shiftKey) {
+      if (app.hidden) return;
+      e.preventDefault();
+      searchBar.hidden = false;
+      msgSearch.focus();
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      state.hiddenUnread = 0;
+      unreadBadge.hidden = true;
+      document.title = 'Agent · Realtime Chat';
+      if (state.room) socket.emit('mark-read', state.room);
+    }
+  });
+
+  /* ----------------------------- Socket ----------------------------- */
+
+  socket.on('connect', () => {
+    connBanner.hidden = true;
+    if (state.me && state.joined) socket.emit('join', { ...state.me, room: state.room || 'Lobby' });
+  });
+  socket.on('disconnect', () => { connBanner.hidden = false; });
+  socket.on('connect_error', () => { connBanner.hidden = false; });
+
+  socket.on('joined', (user) => {
+    state.me = { ...(state.me || {}), ...user };
+    state.joined = true;
+    updateMeCard();
+  });
+
+  socket.on('workspace', (payload) => {
+    state.public = payload.public || [];
+    state.dms = payload.dms || [];
+    state.users = payload.users || [];
+    onlineLabel.textContent = `${payload.online || state.users.length} online`;
+    renderNav();
+    updateHeader();
+  });
+
+  socket.on('room-joined', ({ room, label, meta, messages, lastSeen }) => {
+    state.room = room;
+    state.roomLabel = label || room;
+    state.roomMeta = meta || { type: 'public' };
+    state.messages = Array.isArray(messages) ? messages : [];
+    state.lastSeen = Number(lastSeen) || 0;
+    state.stickBottom = true;
+    jumpLatest.hidden = true;
+    renderMessages();
+    renderNav();
+    updateHeader();
+    socket.emit('mark-read', room);
+    try { localStorage.setItem('agent.room', room); } catch {}
+  });
+
+  socket.on('message', (msg) => {
+    if (!msg) return;
+    if (msg.room === state.room) {
+      state.messages.push(msg);
+      if (state.query) {
+        renderMessages();
+      } else {
+        const last = messagesEl.querySelector('.empty-state') ? null : state.messages[state.messages.length - 2];
+        if (!last || !sameDay(last.ts, msg.ts)) {
+          if (messagesEl.querySelector('.empty-state')) messagesEl.innerHTML = '';
+          messagesEl.appendChild(el('div', { class: 'date-chip', text: formatDay(msg.ts) }));
+        }
+        if (messagesEl.querySelector('.empty-state')) messagesEl.innerHTML = '';
+        const row = messageRow(msg, shouldGroup(last, msg));
+        row.classList.add('fresh');
+        messagesEl.appendChild(row);
+        if (nearBottom() || msg.user?.id === state.me?.id) scrollToBottom(true);
+        else {
+          jumpLatest.hidden = false;
+          state.stickBottom = false;
         }
       }
-    });
-
-    picker.appendChild(pickerMenu);
-
-    div.appendChild(reactionsWrap);
-    div.appendChild(picker);
-
-    // message controls (edit/delete) for message owner
-    if (messageId && user?.id && me?.id && user.id === me.id) {
-      const controls = document.createElement('div');
-      controls.className = 'msg-controls';
-      const editBtn = document.createElement('button');
-      editBtn.className = 'edit-btn';
-      editBtn.textContent = 'Edit';
-      const delBtn = document.createElement('button');
-      delBtn.className = 'del-btn';
-      delBtn.textContent = 'Delete';
-
-      editBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        // replace body with an input for editing
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = body.textContent || '';
-        input.className = 'edit-input';
-        body.innerHTML = '';
-        body.appendChild(input);
-        input.focus();
-        input.select();
-        input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            const newText = input.value.trim();
-            socket.emit('edit-message', { messageId, text: newText });
-          } else if (e.key === 'Escape') {
-            // cancel: restore original text
-            body.textContent = input.value;
-          }
-        });
-        // blur -> submit edit
-        input.addEventListener('blur', () => {
-          const newText = input.value.trim();
-          socket.emit('edit-message', { messageId, text: newText });
-        });
-      });
-
-      delBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (!confirm('Delete this message?')) return;
-        socket.emit('delete-message', { messageId });
-      });
-
-      controls.appendChild(editBtn);
-      controls.appendChild(delBtn);
-      div.appendChild(controls);
     }
-  }
-
-  messagesEl.appendChild(row);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-  // Global click handler to close any open picker menus (added once)
-  document.addEventListener('click', () => {
-    // close any open pickers by removing the 'show' class
-    const open = document.querySelectorAll('.reactions-picker.show');
-    open.forEach(p => { try { p.classList.remove('show'); const b = p.querySelector('.reaction-btn'); if (b) b.setAttribute('aria-expanded', 'false'); } catch(e){} });
+    if (msg.user?.id !== state.me?.id) {
+      if (document.hidden) {
+        state.hiddenUnread += 1;
+        updateHeader();
+        notify(msg.user?.name || 'New message', msg.text || 'Sent an attachment');
+      }
+      if (msg.room === state.room || document.hidden) beep();
+    }
   });
 
-// Render reactions element for a message id and reaction map
-function renderReactions(messageId, reactions){
-  const wrap = document.createElement('div');
-  wrap.className = 'reactions';
-  Object.keys(reactions || {}).forEach(emoji => {
-    const users = reactions[emoji] || [];
-    const el = document.createElement('div');
-    el.className = 'reaction';
-    if (users.includes(me?.id)) el.classList.add('you');
-    const spanEmoji = document.createElement('span');
-    spanEmoji.textContent = emoji;
-    const spanCount = document.createElement('span');
-    spanCount.className = 'count';
-    spanCount.textContent = users.length || 0;
-    el.appendChild(spanEmoji);
-    el.appendChild(spanCount);
-    // clicking reaction toggles for this user
-    el.addEventListener('click', () => socket.emit('reaction', { messageId, emoji }));
-    wrap.appendChild(el);
+  socket.on('reaction', ({ messageId, reactions, userReactions }) => {
+    const msg = state.messages.find((m) => m.id === messageId);
+    if (msg) {
+      msg.reactions = reactions || {};
+      msg.userReactions = userReactions || {};
+    }
+    const row = messagesEl.querySelector(`[data-message-id="${messageId}"]`);
+    if (!row || !msg) return;
+    const prev = row.querySelector('.reactions');
+    if (prev) prev.replaceWith(renderReactions(msg));
   });
-  return wrap;
-}
 
-// Utility: extract distinct emoji characters from text
-function extractEmojis(text){
-  if (!text) return [];
-  // simple emoji regex to capture most emojis (covers multibyte sequences)
-  const emojiRegex = /(?: -|\p{Emoji_Presentation}|\p{Extended_Pictographic})/gu;
-  // fallback: match common emoji ranges
-  const fallback = /[\u231A-\u3299\uD83C-\uDBFF\uDC00-\uDFFF]/g;
-  const matches = (text.match(fallback) || []).filter(Boolean);
-  // dedupe
-  return Array.from(new Set(matches)).slice(0,6);
-}
-
-joinBtn.addEventListener('click', () => {
-  if (joined) return;
-  // set local id immediately from socket.id so messages are rendered as 'own'
-  me = { id: socket.id || null, name: nameInput.value || 'Anonymous' };
-  socket.emit('join', me);
-  joined = true;
-  joinBtn.disabled = true;
-  // mark UI as joined so CSS can hide join inputs and show compact name
-  try { document.body.classList.add('joined'); } catch (e) {}
-});
-
-if (createRoomBtn) {
-  createRoomBtn.addEventListener('click', () => {
-    const r = (roomInput && roomInput.value || '').trim();
-    if (!r) return;
-    joinRoom(r);
-    if (roomInput) roomInput.value = '';
+  socket.on('message-updated', (msg) => {
+    const idx = state.messages.findIndex((m) => m.id === msg.id);
+    if (idx >= 0) state.messages[idx] = msg;
+    renderMessages();
   });
-}
-if (roomInput) {
-  roomInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); createRoomBtn && createRoomBtn.click(); } });
-}
 
-msgForm.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = msgInput.value.trim();
-  if (!text) return;
-  socket.emit('message', { text, room: currentRoom || 'Lobby' });
-  msgInput.value = '';
-});
-
-// Typing indicator: emit 'typing' and 'stop-typing'
-let typingTimeout = null;
-msgInput.addEventListener('input', () => {
-  socket.emit('typing');
-  clearTimeout(typingTimeout);
-  typingTimeout = setTimeout(() => socket.emit('stop-typing'), 1200);
-});
-
-function showToast(text, timeout = 3000) {
-  if (!toastContainer) return;
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.textContent = text;
-  toastContainer.appendChild(t);
-  setTimeout(() => t.remove(), timeout);
-}
-
-let currentSystemToast = null;
-function showSystemToast(text, timeout = 2500) {
-  if (!toastContainer) return;
-  try {
-    if (currentSystemToast) currentSystemToast.remove();
-  } catch (e) {}
-  const t = document.createElement('div');
-  t.className = 'toast system-toast';
-  t.textContent = text;
-  toastContainer.appendChild(t);
-  currentSystemToast = t;
-  setTimeout(() => { try { t.remove(); if (currentSystemToast === t) currentSystemToast = null; } catch(e){} }, timeout);
-}
-
-// clear unread when returning to tab
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    if (unreadBadge) {
-      unreadBadge.hidden = true;
-      unreadBadge.textContent = '0';
-    }
-  }
-});
-
-socket.on('users-list', (list) => {
-  // list is an array of user objects
-  renderUsers(list);
-});
-
-socket.on('rooms-list', (list) => {
-  renderRooms(list || []);
-  // auto-join first room if none selected
-  if (!currentRoom && Array.isArray(list) && list.length) joinRoom(list[0]);
-});
-
-socket.on('dm-invite', ({ room, from }) => {
-  // simple notification UI for incoming DM invite
-  showSystemToast(`${from?.name || 'Someone'} started a DM`);
-  // optionally auto-join the DM (server already joined peer if they were online)
-  // we request join-room which will check membership
-  joinRoom(room);
-});
-
-socket.on('room-joined', ({ room, messages }) => {
-  try { currentRoom = room; } catch(e){}
-  if (currentRoomEl) {
-    currentRoomEl.textContent = `Room: ${room}`;
-    currentRoomEl.hidden = false;
-  }
-  // mark active room in rooms list
-  const items = document.querySelectorAll('#rooms li');
-  items.forEach(i => i.classList.toggle('active', i.textContent === room));
-  // clear current messages and render room history
-  if (messages && Array.isArray(messages)) {
-    messagesEl.innerHTML = '';
-    messages.forEach(m => addMessage(m));
-  }
-});
-
-socket.on('user-joined', (user) => {
-  // Show system message and desktop notification
-  const systemMsg = { user: { name: 'System' }, text: `${user.name || 'A user'} joined` , ts: Date.now() };
-  addMessage(systemMsg);
-  try {
-    if (sysNotifEnabled && Notification && Notification.permission === 'granted') {
-      // close previous system notification if present
-      try { if (currentSystemNotification && currentSystemNotification.close) currentSystemNotification.close(); } catch(e){}
-      currentSystemNotification = new Notification('User joined', { body: `${user.name || 'A user'} joined the chat` });
-      // auto-close after a short duration to avoid lingering
-      setTimeout(() => { try { currentSystemNotification && currentSystemNotification.close(); currentSystemNotification = null; } catch(e){} }, 3500);
-    }
-  } catch (e) {
-    // ignore notification errors in older browsers
-  }
-  // show a short system toast replacing previous one (only if system toasts are allowed)
-  if (sysNotifEnabled) showSystemToast(`${user.name || 'A user'} joined`);
-});
-
-socket.on('user-left', (user) => {
-  const systemMsg = { user: { name: 'System' }, text: `${user?.name || 'A user'} left`, ts: Date.now() };
-  addMessage(systemMsg);
-  try {
-    if (sysNotifEnabled && Notification && Notification.permission === 'granted') {
-      try { if (currentSystemNotification && currentSystemNotification.close) currentSystemNotification.close(); } catch(e){}
-      currentSystemNotification = new Notification('User left', { body: `${user?.name || 'A user'} left the chat` });
-      setTimeout(() => { try { currentSystemNotification && currentSystemNotification.close(); currentSystemNotification = null; } catch(e){} }, 3500);
-    }
-  } catch (e) {
-    // ignore
-  }
-  if (sysNotifEnabled) showSystemToast(`${user?.name || 'A user'} left`);
-});
-
-// Ack from server with full user object (includes assigned id)
-socket.on('joined', (user) => {
-  if (me) {
-    me.id = user.id;
-    if (meNameEl) {
-      meNameEl.textContent = me.name;
-      meNameEl.hidden = false;
-    }
-    if (unreadBadge) {
-      unreadBadge.hidden = true;
-      unreadBadge.textContent = '0';
-    }
-    try { document.body.classList.add('joined'); } catch(e){}
-  }
-});
-
-socket.on('message', (payload) => {
-  addMessage(payload);
-  try {
-    // Skip notification for messages sent by this client (if we know our id)
-    if (Notification && Notification.permission === 'granted' && payload?.user?.id !== me?.id) {
-      const title = payload.user?.name ? `${payload.user.name} says:` : 'New message';
-      new Notification(title, { body: payload.text });
-    }
-  } catch (e) {
-    // ignore notification errors
-  }
-
-  // If document not visible, increase unread badge and show small toast
-  if (document.hidden && unreadBadge) {
-    const current = parseInt(unreadBadge.textContent || '0', 10) || 0;
-    unreadBadge.textContent = current + 1;
-    unreadBadge.hidden = false;
-    showToast(`${payload.user?.name || 'Someone'}: ${payload.text}`);
-  }
-});
-
-socket.on('typing', (user) => {
-  if (typingEl) typingEl.textContent = `${user?.name || 'Someone'} is typing...`;
-});
-
-socket.on('stop-typing', () => {
-  if (typingEl) typingEl.textContent = '';
-});
-
-// handle reaction broadcasts from server
-socket.on('reaction', (payload) => {
-  // payload now contains full reactions map for the message
-  if (!payload || !payload.messageId) return;
-  const { messageId, reactions = {} } = payload;
-  const row = messagesEl.querySelector(`[data-message-id="${messageId}"]`);
-  if (!row) return;
-  const reactionsWrap = row.querySelector('.reactions');
-  if (!reactionsWrap) return;
-  // clear existing reactions and re-render horizontally
-  reactionsWrap.innerHTML = '';
-  Object.keys(reactions).forEach(emojiKey => {
-    const usersList = reactions[emojiKey] || [];
-    const el = document.createElement('div');
-    el.className = 'reaction';
-    if (usersList.includes(me?.id)) el.classList.add('you');
-    const spanEmoji = document.createElement('span');
-    spanEmoji.textContent = emojiKey;
-    const spanCount = document.createElement('span');
-    spanCount.className = 'count';
-    spanCount.textContent = usersList.length || 0;
-    el.appendChild(spanEmoji);
-    el.appendChild(spanCount);
-    el.addEventListener('click', () => socket.emit('reaction', { messageId, emoji: emojiKey }));
-    reactionsWrap.appendChild(el);
+  socket.on('message-deleted', ({ messageId }) => {
+    state.messages = state.messages.filter((m) => m.id !== messageId);
+    const row = messagesEl.querySelector(`[data-message-id="${messageId}"]`);
+    if (row) row.remove();
+    if (!state.messages.length) renderMessages();
   });
-});
 
-// handle message updates (edit)
-socket.on('message-updated', (msg) => {
-  if (!msg || !msg.id) return;
-  const row = messagesEl.querySelector(`[data-message-id="${msg.id}"]`);
-  if (!row) return;
-  const body = row.querySelector('.msg > div:nth-child(2)');
-  if (body) {
-    body.textContent = msg.text || '';
-    // append edited marker
-    let meta = row.querySelector('.meta');
-    if (meta && !meta.querySelector('.edited')) {
-      const s = document.createElement('span');
-      s.className = 'edited';
-      s.textContent = ' (edited)';
-      s.style.marginLeft = '8px';
-      s.style.fontSize = '11px';
-      meta.appendChild(s);
-    }
-  }
-});
+  socket.on('typing', ({ room, user }) => {
+    if (room !== state.room || user?.id === state.me?.id) return;
+    state.typers.set(user.id, user.name);
+    renderTyping();
+    clearTimeout(state.typers._t);
+    state.typers._t = setTimeout(() => { state.typers.delete(user.id); renderTyping(); }, 2000);
+  });
 
-// handle message deletions
-socket.on('message-deleted', ({ messageId }) => {
-  if (!messageId) return;
-  const row = messagesEl.querySelector(`[data-message-id="${messageId}"]`);
-  if (!row) return;
-  const body = row.querySelector('.msg > div:nth-child(2)');
-  if (body) {
-    body.textContent = '[message deleted]';
-    row.classList.add('deleted');
-    // remove controls if present
-    const controls = row.querySelector('.msg-controls'); if (controls) controls.remove();
+  socket.on('stop-typing', ({ room, user }) => {
+    if (room !== state.room) return;
+    state.typers.delete(user?.id);
+    renderTyping();
+  });
+
+  function renderTyping() {
+    const names = [...state.typers.values()];
+    if (!names.length) typingEl.textContent = '';
+    else if (names.length === 1) typingEl.textContent = `${names[0]} is typing…`;
+    else if (names.length === 2) typingEl.textContent = `${names[0]} and ${names[1]} are typing…`;
+    else typingEl.textContent = 'Several people are typing…';
   }
-});
+
+  socket.on('presence', ({ type, user, online }) => {
+    if (online != null) onlineLabel.textContent = `${online} online`;
+    if (!state.prefs.presence || !user || user.id === state.me?.id) return;
+    toast(`${user.name} ${type === 'leave' ? 'left' : 'joined'}`);
+  });
+
+  socket.on('dm-invite', ({ from }) => {
+    toast(`${from?.name || 'Someone'} started a direct message`);
+  });
+
+  socket.on('error-message', ({ message }) => toast(message || 'Something went wrong'));
+})();
