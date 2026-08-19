@@ -84,7 +84,19 @@ test('two users exchange a public message', async () => {
   b.socket.close();
 });
 
+test('only General exists until a host creates a room', async () => {
+  const guest = await connect('OnlyGen');
+  const names = [...runtime.internals.roomsMeta.keys()].filter((n) => (runtime.internals.roomsMeta.get(n) || {}).type !== 'dm');
+  assert.deepEqual(names, ['General']);
+  guest.socket.emit('join-room', 'Coding');
+  await waitFor(() => guest.errors.includes('Room not found'));
+  guest.socket.close();
+});
+
 test('typing is room-scoped', async () => {
+  const host = await connect('TyHost', { hostCode: HOST_CODE });
+  host.socket.emit('create-room', { name: 'Coding' });
+  await waitFor(() => host.rooms.includes('Coding'));
   const a = await connect('TyA');
   const b = await connect('TyB');
   const c = await connect('TyC');
@@ -94,19 +106,24 @@ test('typing is room-scoped', async () => {
   await waitFor(() => b.typing.some((t) => t.room === 'General'));
   await new Promise((r) => setTimeout(r, 80));
   assert.equal(c.typing.some((t) => t.room === 'General'), false);
+  host.socket.close();
   a.socket.close();
   b.socket.close();
   c.socket.close();
 });
 
 test('public rooms stay isolated', async () => {
+  const host = await connect('IsoHost', { hostCode: HOST_CODE });
+  host.socket.emit('create-room', { name: 'Focus' });
+  await waitFor(() => host.rooms.includes('Focus'));
   const a = await connect('IsoA');
   const b = await connect('IsoB');
-  a.socket.emit('join-room', 'Coding');
-  await waitFor(() => a.rooms.includes('Coding'));
-  a.socket.emit('message', { text: 'only coding', room: 'Coding' });
+  a.socket.emit('join-room', 'Focus');
+  await waitFor(() => a.rooms.includes('Focus'));
+  a.socket.emit('message', { text: 'only focus', room: 'Focus' });
   await new Promise((r) => setTimeout(r, 120));
-  assert.equal(b.messages.some((m) => m.text === 'only coding' && m.room === 'General'), false);
+  assert.equal(b.messages.some((m) => m.text === 'only focus' && m.room === 'General'), false);
+  host.socket.close();
   a.socket.close();
   b.socket.close();
 });
@@ -144,6 +161,9 @@ test('unauthorized user cannot join a DM', async () => {
 });
 
 test('reconnect restores the session', async () => {
+  const host = await connect('ReHost', { hostCode: HOST_CODE });
+  host.socket.emit('create-room', { name: 'Career' });
+  await waitFor(() => host.rooms.includes('Career'));
   const id = uid('recon');
   const first = await connect('Rejoin', { id });
   first.socket.emit('join-room', 'Career');
@@ -152,6 +172,7 @@ test('reconnect restores the session', async () => {
   const second = await connect('Rejoin', { id, room: 'Career' });
   assert.equal(second.user.id, id);
   assert.ok(second.rooms.includes('Career') || second.user.room === 'Career');
+  host.socket.close();
   second.socket.close();
 });
 

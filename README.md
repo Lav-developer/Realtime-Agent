@@ -12,8 +12,8 @@ User → website → live session → realtime conversation with the host/commun
 
 - Host is visually marked **HOST**
 - Guests are marked **USER**
-- `#General` is open to everyone
-- Extra rooms can be created by the host
+- `#General` is the only default room
+- Extra rooms appear only when the host creates them
 - **Request Help** opens (or queues) a private conversation with the host
 
 ## Features

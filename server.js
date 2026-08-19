@@ -34,9 +34,6 @@ const PALETTE = ['#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#6366f1
 
 const DEFAULT_ROOMS = [
   { name: 'General', description: 'Ask anything — everyone is welcome' },
-  { name: 'Coding', description: 'Bugs, code reviews, and debugging' },
-  { name: 'Career', description: 'Jobs, internships, and guidance' },
-  { name: 'Projects', description: 'Share work and build together' },
 ];
 
 const HELP_CATEGORIES = new Set(['Coding', 'College', 'Career', 'Projects', 'General', 'Other']);
