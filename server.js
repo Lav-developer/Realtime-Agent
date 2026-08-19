@@ -854,34 +854,54 @@ function createRuntime(options = {}) {
       if (room && canAccess(room, user.id)) markRead(room, user.id);
     });
 
-    socket.on('disconnect', () => {
-      const user = sockets.get(socket.id);
-      sockets.delete(socket.id);
+    function dropSocket(sock, immediate) {
+      const user = sockets.get(sock.id);
+      sockets.delete(sock.id);
       if (!user) return;
-      if (socket.data.room) {
-        emitToViewers(socket.data.room, 'stop-typing', { room: socket.data.room, user: publicUser(user) }, socket.id);
+      if (sock.data.room) {
+        emitToViewers(sock.data.room, 'stop-typing', { room: sock.data.room, user: publicUser(user) }, sock.id);
       }
+      sock.data.room = null;
       const entry = online.get(user.id);
       if (entry) {
-        entry.socketIds.delete(socket.id);
+        entry.socketIds.delete(sock.id);
         if (entry.socketIds.size > 0) return;
       }
-      disconnectTimers.set(
-        user.id,
-        setTimeout(() => {
-          disconnectTimers.delete(user.id);
-          const still = online.get(user.id);
-          if (still && still.socketIds.size > 0) return;
-          online.delete(user.id);
-          emitStateAll();
-          io.emit('presence', {
-            type: 'leave',
-            user: { id: user.id, name: user.name, color: user.color, role: user.role },
-            online: online.size,
-            session: sessionInfo(),
-          });
-        }, 3500)
-      );
+      const finish = () => {
+        online.delete(user.id);
+        emitStateAll();
+        io.emit('presence', {
+          type: 'leave',
+          user: { id: user.id, name: user.name, color: user.color, role: user.role },
+          online: online.size,
+          session: sessionInfo(),
+        });
+      };
+      if (disconnectTimers.has(user.id)) {
+        clearTimeout(disconnectTimers.get(user.id));
+        disconnectTimers.delete(user.id);
+      }
+      if (immediate) finish();
+      else {
+        disconnectTimers.set(
+          user.id,
+          setTimeout(() => {
+            disconnectTimers.delete(user.id);
+            const still = online.get(user.id);
+            if (still && still.socketIds.size > 0) return;
+            finish();
+          }, 3500)
+        );
+      }
+    }
+
+    socket.on('leave', () => {
+      dropSocket(socket, true);
+      socket.emit('left');
+    });
+
+    socket.on('disconnect', () => {
+      dropSocket(socket, false);
     });
   });
 

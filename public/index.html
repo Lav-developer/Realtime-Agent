@@ -80,14 +80,17 @@
           </section>
         </div>
 
-        <button id="meCard" class="me-card" type="button" title="Open settings">
-          <span id="meAvatar" class="avatar">A</span>
-          <span class="me-meta">
-            <span id="meName" class="me-name">You</span>
-            <span class="me-status" id="meRole"><i class="dot"></i> User</span>
-          </span>
-          <span class="gear" aria-hidden="true">⚙</span>
-        </button>
+        <div class="me-wrap">
+          <button id="meCard" class="me-card" type="button" title="Open settings">
+            <span id="meAvatar" class="avatar">A</span>
+            <span class="me-meta">
+              <span id="meName" class="me-name">You</span>
+              <span class="me-status" id="meRole"><i class="dot"></i> User</span>
+            </span>
+            <span class="gear" aria-hidden="true">⚙</span>
+          </button>
+          <button id="leaveBtn" class="leave-btn" type="button" title="Leave the live session">Leave</button>
+        </div>
       </aside>
 
       <main class="main">
@@ -205,6 +208,7 @@
             <button type="button" class="btn ghost" data-close="settingsModal">Close</button>
             <button type="submit" class="btn">Save</button>
           </div>
+          <button id="logoutBtn" class="btn danger logout-btn" type="button">Leave session</button>
         </form>
       </div>
     </div>

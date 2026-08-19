@@ -344,8 +344,16 @@ html[data-theme="light"] .unread-pill { color: #fff; }
 
 .people li .name { font-size: 14px; }
 
-.me-card {
+.me-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
   margin: 8px;
+}
+
+.me-card {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -354,6 +362,27 @@ html[data-theme="light"] .unread-pill { color: #fff; }
   border: 1px solid var(--border);
   background: var(--surface);
   text-align: left;
+}
+
+.leave-btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 14px;
+  padding: 0 12px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.leave-btn:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: var(--danger-soft);
+}
+
+.logout-btn {
+  width: 100%;
+  margin-top: 14px;
 }
 
 .me-card:hover { border-color: var(--border-strong); }

@@ -222,6 +222,19 @@ test('upload allow-list rejects bad types', async () => {
   assert.equal(res2.status, 200);
 });
 
+test('leave removes the user immediately so they can join again', async () => {
+  const a = await connect('Leaver');
+  const b = await connect('Watcher');
+  a.socket.emit('leave');
+  await waitFor(() => b.presence.some((p) => p.type === 'leave' && p.user.name === 'Leaver'));
+  const health = await fetch(`http://127.0.0.1:${port}/api/health`).then((r) => r.json());
+  assert.ok(health.users >= 1);
+  a.socket.emit('join', { id: a.user.id, name: 'Leaver', color: '#3b82f6', room: 'General' });
+  await waitFor(() => b.presence.filter((p) => p.type === 'join' && p.user.name === 'Leaver').length >= 1);
+  a.socket.close();
+  b.socket.close();
+});
+
 test('message rate limit kicks in', async () => {
   const a = await connect('Spam');
   for (let i = 0; i < 24; i++) a.socket.emit('message', { text: `n${i}`, room: 'General' });

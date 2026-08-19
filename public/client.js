@@ -676,6 +676,49 @@
     setSidebar(false);
   }
 
+  function logout() {
+    if (!state.joined && app.hidden) return;
+    socket.emit('leave');
+    socket.emit('stop-typing');
+    state.joined = false;
+    state.me = null;
+    state.room = null;
+    state.roomMeta = null;
+    state.roomLabel = '';
+    state.public = [];
+    state.dms = [];
+    state.users = [];
+    state.messages = [];
+    state.replyTo = null;
+    state.attachments = [];
+    state.canCreateRoom = false;
+    state.typers.clear();
+    state.hiddenUnread = 0;
+    try { localStorage.removeItem('agent.room'); } catch {}
+    msgInput.value = '';
+    msgInput.disabled = true;
+    sendBtn.disabled = true;
+    replyBar.hidden = true;
+    attachPreview.hidden = true;
+    attachPreview.innerHTML = '';
+    searchBar.hidden = true;
+    jumpLatest.hidden = true;
+    if (typingEl) typingEl.textContent = '';
+    messagesEl.innerHTML = '';
+    roomsEl.innerHTML = '';
+    dmsEl.innerHTML = '';
+    usersEl.innerHTML = '';
+    document.querySelectorAll('.modal').forEach((m) => { m.hidden = true; });
+    setSidebar(false);
+    app.hidden = true;
+    gate.hidden = false;
+    const remembered = savedName();
+    if (remembered) $('gateName').value = remembered;
+    $('gateName').focus();
+    document.title = 'Agent · Live support';
+    toast('You left the session');
+  }
+
   function enterWorkspace(name) {
     const clean = String(name || '').trim().slice(0, 32);
     if (!clean) return;
@@ -782,6 +825,10 @@
   }
   $('settingsBtn').addEventListener('click', openSettings);
   $('meCard').addEventListener('click', openSettings);
+  const logoutBtn = $('logoutBtn');
+  if (logoutBtn) logoutBtn.addEventListener('click', logout);
+  const leaveBtn = $('leaveBtn');
+  if (leaveBtn) leaveBtn.addEventListener('click', logout);
   $('settingsForm').addEventListener('submit', (e) => {
     e.preventDefault();
     state.prefs.notif = $('setNotif').checked;
@@ -998,6 +1045,7 @@
   });
 
   socket.on('room-joined', ({ room, label, meta, messages, lastSeen }) => {
+    if (!state.joined) return;
     state.room = room;
     state.roomLabel = label || room;
     state.roomMeta = meta || { type: 'public' };
@@ -1013,6 +1061,7 @@
   });
 
   socket.on('message', (msg) => {
+    if (!state.joined) return;
     if (!msg || !msg.id) return;
     if (state.messages.some((m) => m.id === msg.id)) return;
     if (msg.room === state.room) {
