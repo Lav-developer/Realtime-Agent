@@ -55,6 +55,10 @@
     stickBottom: true,
     lastSeen: 0,
     newDividerId: null,
+    session: { live: false, hostOnline: false, hosts: 0 },
+    canCreateRoom: false,
+    rtt: null,
+    conn: 'connecting',
   };
 
   function loadPrefs() {
@@ -305,7 +309,11 @@
         'li',
         { class: active ? 'active' : '', role: 'button', tabindex: '0', onclick: () => joinRoom(d.room), onkeydown: navKey(() => joinRoom(d.room)) },
         avatar(d.peer.name, d.peer.color, 'sm'),
-        el('span', { class: 'name' }, el('span', { text: d.peer.name }), el('span', { class: 'preview', text: last })),
+        el('span', { class: 'name' },
+          el('span', { text: d.peer.name }),
+          d.peer.role === 'host' ? el('span', { class: 'role-pill host', text: 'HOST' }) : null,
+          el('span', { class: 'preview', text: d.help ? `Help · ${last}` : last })
+        ),
         el('span', { class: 'nav-meta' }, d.unread ? el('span', { class: 'unread-pill', text: String(d.unread) }) : null)
       );
       dmsEl.appendChild(li);
@@ -323,7 +331,10 @@
           onkeydown: navKey(() => { if (!self) startDm(u.id); }),
         },
         avatar(u.name, u.color, 'sm'),
-        el('span', { class: 'name', text: self ? `${u.name} (you)` : u.name })
+        el('span', { class: 'name' },
+          self ? `${u.name} (you)` : u.name,
+          el('span', { class: `role-pill ${u.role === 'host' ? 'host' : 'user'}`, text: u.role === 'host' ? 'HOST' : 'USER' })
+        )
       );
       usersEl.appendChild(li);
     });
@@ -347,7 +358,9 @@
     } else if (!document.hidden) {
       unreadBadge.hidden = true;
     }
-    document.title = unread && document.hidden ? `(${unread}) Agent` : 'Agent · Realtime Chat';
+    document.title = unread && document.hidden ? `(${unread}) Agent` : 'Agent · Live support';
+    const createBtn = $('newRoomBtn');
+    if (createBtn) createBtn.hidden = !state.canCreateRoom;
   }
 
   function updateMeCard() {
@@ -356,6 +369,62 @@
     const av = $('meAvatar');
     av.textContent = initials(state.me.name);
     av.style.background = state.me.color || colorFromId(state.me.id);
+    const roleEl = $('meRole');
+    if (roleEl) {
+      roleEl.innerHTML = '';
+      roleEl.append(el('i', { class: 'dot' }), state.me.role === 'host' ? ' Host' : ' User');
+    }
+  }
+
+  function setConn(kind, rtt) {
+    state.conn = kind;
+    if (rtt != null) state.rtt = rtt;
+    const elStatus = $('connStatus');
+    const banner = connBanner;
+    if (!elStatus) return;
+    if (kind === 'connected') {
+      const ms = state.rtt;
+      let quality = '';
+      if (ms != null) {
+        if (ms < 100) quality = 'Excellent';
+        else if (ms < 200) quality = 'Good';
+        else if (ms < 400) quality = 'Slow';
+        else quality = 'Poor';
+        elStatus.textContent = `🟢 Connected · ${ms}ms`;
+        elStatus.title = `${quality} (${ms}ms)`;
+      } else {
+        elStatus.textContent = '🟢 Connected';
+      }
+      if (banner) banner.hidden = true;
+    } else if (kind === 'reconnecting') {
+      elStatus.textContent = '🟡 Reconnecting…';
+      if (banner) { banner.hidden = false; banner.textContent = 'Reconnecting to the live session…'; }
+    } else {
+      elStatus.textContent = '🔴 Disconnected';
+      if (banner) { banner.hidden = false; banner.textContent = 'Disconnected. We usually come online Saturday & Sunday.'; }
+    }
+  }
+
+  function setSession(session, fromSocket) {
+    state.session = { live: !!(fromSocket || session?.live), hostOnline: !!session?.hostOnline, hosts: session?.hosts || 0 };
+    const live = state.conn === 'connected' || state.conn === 'connecting' && state.session.live;
+    const gateLive = $('gateLive');
+    const pill = $('sessionPill');
+    const onlineNow = state.conn === 'connected';
+    const text = !onlineNow
+      ? '⚫ Offline · We usually come online Saturday & Sunday'
+      : state.session.hostOnline
+        ? '🟢 Live now · Support is currently online'
+        : '🟡 Live · Waiting for a host';
+    const cls = !onlineNow ? 'offline' : state.session.hostOnline ? 'live' : 'wait';
+    if (gateLive) {
+      gateLive.className = `live-pill ${cls}`;
+      gateLive.textContent = text;
+    }
+    if (pill) {
+      pill.className = `live-pill compact ${cls}`;
+      pill.textContent = !onlineNow ? '⚫ Offline' : state.session.hostOnline ? '🟢 Live now' : '🟡 Waiting for host';
+    }
   }
 
   function nearBottom() {
@@ -392,18 +461,17 @@
 
     messagesEl.innerHTML = '';
     if (!list.length) {
-      const prompts = ['Hello everyone 👋', 'What are we working on today?', 'Quick standup?'];
       messagesEl.appendChild(
         el(
           'div',
           { class: 'empty-state' },
           el('div', { class: 'mark', 'aria-hidden': 'true' }, el('span', { class: 'mark-ring' }), el('span', { class: 'mark-core' })),
-          el('h3', { text: q ? 'No matching messages' : 'Start the conversation' }),
-          el('p', { text: q ? 'Try a different search.' : 'Say hello, drop a file, or react once someone else writes.' }),
+          el('h3', { text: q ? 'No matching messages' : 'This room is quiet' }),
+          el('p', { text: q ? 'Try a different search.' : 'Ask a question, drop a screenshot, or tap Help to reach the host.' }),
           !q && el(
             'div',
             { class: 'prompt-row' },
-            prompts.map((p) => el('button', {
+            ['I need help with an error', 'Can someone review this?', 'How should I start?'].map((p) => el('button', {
               type: 'button',
               class: 'prompt-chip',
               onclick: () => { msgInput.value = p; msgInput.focus(); resizeComposer(); },
@@ -450,6 +518,7 @@
       'div',
       { class: 'meta' },
       el('span', { class: 'who', text: msg.user?.name || 'Someone' }),
+      msg.user?.role === 'host' ? el('span', { class: 'role-pill host', text: 'HOST' }) : null,
       el('span', { class: 'when', text: formatTime(msg.ts), title: new Date(msg.ts).toLocaleString() }),
       msg.edited ? el('span', { class: 'edited', text: 'edited' }) : null
     );
@@ -485,6 +554,11 @@
     }
 
     bubble.appendChild(renderReactions(msg));
+    if (mine && (state.roomMeta?.type === 'dm' || String(state.room || '').startsWith('dm-'))) {
+      const read = (msg.readBy || []).some((id) => id !== state.me?.id);
+      const label = read ? '✓✓ Read' : msg.delivered ? '✓✓ Delivered' : '✓ Sent';
+      bubble.appendChild(el('div', { class: `receipts${read ? ' read' : ''}`, text: label }));
+    }
     row.appendChild(bubble);
     row.appendChild(toolbar(msg, mine));
     return row;
@@ -514,6 +588,8 @@
     bar.appendChild(el('button', { type: 'button', title: 'Reply', onclick: () => setReply(msg) }, '↩'));
     if (mine) {
       bar.appendChild(el('button', { type: 'button', title: 'Edit', onclick: () => beginEdit(msg) }, 'Edit'));
+    }
+    if (mine || state.me?.role === 'host') {
       bar.appendChild(el('button', { type: 'button', class: 'danger', title: 'Delete', onclick: () => askDelete(msg) }, 'Del'));
     }
     bar.appendChild(el('button', {
@@ -604,14 +680,17 @@
     const clean = String(name || '').trim().slice(0, 32);
     if (!clean) return;
     try { localStorage.setItem('agent.name', clean); } catch {}
+    const codeEl = $('gateCode');
+    const hostCode = codeEl && codeEl.value ? codeEl.value : '';
+    if (codeEl) codeEl.value = '';
     const me = {
       id: uid(),
       name: clean,
       color: state.prefs.color || colorFromId(uid()),
-      room: (() => { try { return localStorage.getItem('agent.room') || 'Lobby'; } catch { return 'Lobby'; } })(),
+      room: (() => { try { return localStorage.getItem('agent.room') || 'General'; } catch { return 'General'; } })(),
     };
     state.me = me;
-    socket.emit('join', me);
+    socket.emit('join', hostCode ? { ...me, hostCode } : me);
     gate.hidden = true;
     app.hidden = false;
     msgInput.disabled = false;
@@ -867,7 +946,7 @@
     if (!document.hidden) {
       state.hiddenUnread = 0;
       unreadBadge.hidden = true;
-      document.title = 'Agent · Realtime Chat';
+      document.title = 'Agent · Live support';
       if (state.room) socket.emit('mark-read', state.room);
     }
   });
@@ -875,11 +954,30 @@
   /* ----------------------------- Socket ----------------------------- */
 
   socket.on('connect', () => {
-    connBanner.hidden = true;
-    if (state.me && state.joined) socket.emit('join', { ...state.me, room: state.room || 'Lobby' });
+    setConn('connected');
+    setSession(state.session, true);
+    if (state.me && state.joined) socket.emit('join', { id: state.me.id, name: state.me.name, color: state.me.color, room: state.room || 'General' });
+    pingOnce();
   });
-  socket.on('disconnect', () => { connBanner.hidden = false; });
-  socket.on('connect_error', () => { connBanner.hidden = false; });
+  socket.on('disconnect', (reason) => {
+    if (reason === 'io client disconnect') setConn('disconnected');
+    else setConn('reconnecting');
+    setSession({ live: false, hostOnline: false, hosts: 0 });
+  });
+  socket.on('connect_error', () => {
+    setConn(state.joined ? 'reconnecting' : 'disconnected');
+    setSession({ live: false, hostOnline: false, hosts: 0 });
+  });
+  socket.io.on('reconnect_attempt', () => setConn('reconnecting'));
+
+  function pingOnce() {
+    socket.emit('ping-rtt', Date.now());
+  }
+  setInterval(() => { if (socket.connected) pingOnce(); }, 12000);
+  socket.on('pong-rtt', (sentAt) => {
+    if (typeof sentAt === 'number') setConn('connected', Math.max(0, Date.now() - sentAt));
+  });
+  socket.on('session', (session) => setSession(session, true));
 
   socket.on('joined', (user) => {
     state.me = { ...(state.me || {}), ...user };
@@ -891,9 +989,12 @@
     state.public = payload.public || [];
     state.dms = payload.dms || [];
     state.users = payload.users || [];
+    state.canCreateRoom = !!payload.canCreateRoom;
+    if (payload.session) setSession(payload.session, true);
     onlineLabel.textContent = `${payload.online || state.users.length} online`;
     renderNav();
     updateHeader();
+    updateMeCard();
   });
 
   socket.on('room-joined', ({ room, label, meta, messages, lastSeen }) => {
@@ -912,7 +1013,8 @@
   });
 
   socket.on('message', (msg) => {
-    if (!msg) return;
+    if (!msg || !msg.id) return;
+    if (state.messages.some((m) => m.id === msg.id)) return;
     if (msg.room === state.room) {
       state.messages.push(msg);
       if (state.query) {
@@ -1001,5 +1103,55 @@
     toast(`${from?.name || 'Someone'} started a direct message`);
   });
 
+  socket.on('receipt', ({ messageId, read, readBy, delivered }) => {
+    const msg = state.messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    if (delivered) msg.delivered = true;
+    if (readBy) msg.readBy = readBy;
+    else if (read) msg.readBy = msg.readBy || ['1'];
+    const row = messagesEl.querySelector(`[data-message-id="${messageId}"] .receipts`);
+    if (row) {
+      const isRead = (msg.readBy || []).some((id) => id !== state.me?.id);
+      row.textContent = isRead ? '✓✓ Read' : msg.delivered ? '✓✓ Delivered' : '✓ Sent';
+      row.classList.toggle('read', isRead);
+    }
+  });
+
+  socket.on('help-queued', ({ message }) => toast(message || 'Help request queued'));
+
   socket.on('error-message', ({ message }) => toast(message || 'Something went wrong'));
+
+  const helpBtn = $('helpBtn');
+  if (helpBtn) helpBtn.addEventListener('click', () => {
+    openModal('helpModal');
+    $('helpTitle')?.focus();
+  });
+  const helpForm = $('helpForm');
+  if (helpForm) {
+    helpForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!state.joined) return toast('Join the session first');
+      socket.emit('request-help', {
+        title: $('helpTitle').value.trim(),
+        category: $('helpCat').value,
+        description: $('helpDesc').value.trim(),
+        attachments: state.attachments,
+      });
+      helpForm.reset();
+      closeModal('helpModal');
+      toast(state.session.hostOnline ? 'Sent to the host' : 'Queued until a host is online');
+    });
+  }
+
+  async function refreshGateHealth() {
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' });
+      const data = await res.json();
+      if (socket.connected) setSession(data, true);
+    } catch {
+      if (!socket.connected) setSession({ live: false, hostOnline: false }, false);
+    }
+  }
+  refreshGateHealth();
+  setInterval(refreshGateHealth, 15000);
 })();

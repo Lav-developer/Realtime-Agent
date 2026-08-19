@@ -995,3 +995,73 @@ mark.hit {
 html[data-theme="light"] .gate-orb-a { background: #9db0ff; opacity: 0.45; }
 html[data-theme="light"] .gate-orb-b { background: #8ee0c8; opacity: 0.4; }
 html[data-theme="light"] .gate-orb-c { background: #e2b4ea; opacity: 0.35; }
+
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.live-pill.live { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+.live-pill.offline { color: var(--faint); }
+.live-pill.wait { color: var(--warn); }
+.live-pill.compact { margin: 6px 0 0; padding: 3px 8px; font-size: 11px; }
+
+.host-access { margin-top: 14px; color: var(--muted); font-size: 13px; }
+.host-access summary { cursor: pointer; font-weight: 600; }
+.host-access input { margin-top: 8px; }
+
+.role-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  vertical-align: middle;
+}
+.role-pill.host { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.role-pill.user { background: var(--surface-3); color: var(--faint); }
+
+.help-btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0 10px;
+  height: 36px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.help-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.conn-status {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.receipts {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--faint);
+  text-align: right;
+}
+.receipts.read { color: var(--accent); }
+
+.modal-card select,
+.modal-card textarea { margin-bottom: 12px; }
+
+@media (max-width: 860px) {
+  .conn-status { display: none; }
+  .help-btn { padding: 0 8px; }
+}
