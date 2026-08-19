@@ -258,7 +258,10 @@ html[data-theme="light"] .send-btn { color: #fff; }
   align-items: center;
   gap: 12px;
   padding: 18px 16px 12px;
+  min-width: 0;
 }
+
+.brand > div:nth-child(2) { min-width: 0; flex: 1; }
 
 .brand-name { font-weight: 800; letter-spacing: -0.03em; }
 .brand-sub { color: var(--faint); font-size: 12px; margin-top: 1px; }
@@ -346,14 +349,13 @@ html[data-theme="light"] .unread-pill { color: #fff; }
 
 .me-wrap {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
   gap: 8px;
   margin: 8px;
 }
 
 .me-card {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -365,11 +367,12 @@ html[data-theme="light"] .unread-pill { color: #fff; }
 }
 
 .leave-btn {
+  width: 100%;
+  height: 40px;
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--muted);
-  border-radius: 14px;
-  padding: 0 12px;
+  border-radius: 12px;
   font-weight: 700;
   font-size: 13px;
 }
@@ -448,7 +451,12 @@ html[data-theme="light"] .unread-pill { color: #fff; }
   white-space: nowrap;
 }
 
-.header-actions { display: flex; gap: 6px; }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
 .icon-btn {
   width: 36px;
@@ -904,7 +912,7 @@ html[data-theme="light"] .unread-pill { color: #fff; }
 @media (max-width: 480px) {
   .gate-card { padding: 28px 20px; }
   .send-btn { padding: 0 12px; }
-  .header-actions .icon-btn:nth-child(2) { display: none; }
+  #themeBtn { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

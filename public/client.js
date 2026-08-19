@@ -59,6 +59,7 @@
     canCreateRoom: false,
     rtt: null,
     conn: 'connecting',
+    left: false,
   };
 
   function loadPrefs() {
@@ -676,11 +677,17 @@
     setSidebar(false);
   }
 
-  function logout() {
-    if (!state.joined && app.hidden) return;
-    socket.emit('leave');
-    socket.emit('stop-typing');
+  function logout(ev) {
+    if (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+    state.left = true;
     state.joined = false;
+    try { sessionStorage.setItem('agent.left', '1'); } catch {}
+    try { localStorage.removeItem('agent.room'); } catch {}
+    try { socket.emit('stop-typing'); } catch {}
+    try { socket.emit('leave'); } catch {}
     state.me = null;
     state.room = null;
     state.roomMeta = null;
@@ -694,27 +701,30 @@
     state.canCreateRoom = false;
     state.typers.clear();
     state.hiddenUnread = 0;
-    try { localStorage.removeItem('agent.room'); } catch {}
-    msgInput.value = '';
-    msgInput.disabled = true;
-    sendBtn.disabled = true;
-    replyBar.hidden = true;
-    attachPreview.hidden = true;
-    attachPreview.innerHTML = '';
-    searchBar.hidden = true;
-    jumpLatest.hidden = true;
+    if (msgInput) {
+      msgInput.value = '';
+      msgInput.disabled = true;
+    }
+    if (sendBtn) sendBtn.disabled = true;
+    if (replyBar) replyBar.hidden = true;
+    if (attachPreview) {
+      attachPreview.hidden = true;
+      attachPreview.innerHTML = '';
+    }
+    if (searchBar) searchBar.hidden = true;
+    if (jumpLatest) jumpLatest.hidden = true;
     if (typingEl) typingEl.textContent = '';
-    messagesEl.innerHTML = '';
-    roomsEl.innerHTML = '';
-    dmsEl.innerHTML = '';
-    usersEl.innerHTML = '';
+    if (messagesEl) messagesEl.innerHTML = '';
+    if (roomsEl) roomsEl.innerHTML = '';
+    if (dmsEl) dmsEl.innerHTML = '';
+    if (usersEl) usersEl.innerHTML = '';
     document.querySelectorAll('.modal').forEach((m) => { m.hidden = true; });
     setSidebar(false);
-    app.hidden = true;
-    gate.hidden = false;
+    if (app) app.hidden = true;
+    if (gate) gate.hidden = false;
     const remembered = savedName();
-    if (remembered) $('gateName').value = remembered;
-    $('gateName').focus();
+    if (remembered && $('gateName')) $('gateName').value = remembered;
+    if ($('gateName')) $('gateName').focus();
     document.title = 'Agent · Live support';
     toast('You left the session');
   }
@@ -732,6 +742,8 @@
       color: state.prefs.color || colorFromId(uid()),
       room: (() => { try { return localStorage.getItem('agent.room') || 'General'; } catch { return 'General'; } })(),
     };
+    state.left = false;
+    try { sessionStorage.removeItem('agent.left'); } catch {}
     state.me = me;
     socket.emit('join', hostCode ? { ...me, hostCode } : me);
     gate.hidden = true;
@@ -753,7 +765,8 @@
   if (remembered) $('gateName').value = remembered;
   $('gateName').focus();
   try {
-    if (remembered && localStorage.getItem('agent.room')) enterWorkspace(remembered);
+    const left = sessionStorage.getItem('agent.left') === '1';
+    if (!left && remembered && localStorage.getItem('agent.room')) enterWorkspace(remembered);
   } catch {}
 
   navSearch.addEventListener('input', () => {
@@ -1003,7 +1016,9 @@
   socket.on('connect', () => {
     setConn('connected');
     setSession(state.session, true);
-    if (state.me && state.joined) socket.emit('join', { id: state.me.id, name: state.me.name, color: state.me.color, room: state.room || 'General' });
+    if (!state.left && state.me && state.joined) {
+      socket.emit('join', { id: state.me.id, name: state.me.name, color: state.me.color, room: state.room || 'General' });
+    }
     pingOnce();
   });
   socket.on('disconnect', (reason) => {
@@ -1027,17 +1042,19 @@
   socket.on('session', (session) => setSession(session, true));
 
   socket.on('joined', (user) => {
+    if (state.left) return;
     state.me = { ...(state.me || {}), ...user };
     state.joined = true;
     updateMeCard();
   });
 
   socket.on('workspace', (payload) => {
+    if (payload.session) setSession(payload.session, true);
+    if (state.left || !state.joined) return;
     state.public = payload.public || [];
     state.dms = payload.dms || [];
     state.users = payload.users || [];
     state.canCreateRoom = !!payload.canCreateRoom;
-    if (payload.session) setSession(payload.session, true);
     onlineLabel.textContent = `${payload.online || state.users.length} online`;
     renderNav();
     updateHeader();
@@ -1061,7 +1078,7 @@
   });
 
   socket.on('message', (msg) => {
-    if (!state.joined) return;
+    if (state.left || !state.joined) return;
     if (!msg || !msg.id) return;
     if (state.messages.some((m) => m.id === msg.id)) return;
     if (msg.room === state.room) {
@@ -1143,7 +1160,8 @@
   }
 
   socket.on('presence', ({ type, user, online }) => {
-    if (online != null) onlineLabel.textContent = `${online} online`;
+    if (state.left) return;
+    if (online != null && onlineLabel) onlineLabel.textContent = `${online} online`;
     if (!state.prefs.presence || !user || user.id === state.me?.id) return;
     toast(`${user.name} ${type === 'leave' ? 'left' : 'joined'}`);
   });
