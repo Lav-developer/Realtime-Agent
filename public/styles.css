@@ -53,6 +53,10 @@ html[data-theme="light"] {
 
 html, body { height: 100%; }
 
+body.in-session #gate { display: none !important; }
+body.in-session #app { display: grid !important; }
+body:not(.in-session) #app { display: none !important; }
+
 body {
   margin: 0;
   font-family: var(--font);
@@ -381,6 +385,13 @@ html[data-theme="light"] .unread-pill { color: #fff; }
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   background: var(--danger-soft);
+}
+
+.header-leave {
+  width: auto;
+  height: 36px;
+  padding: 0 12px;
+  flex-shrink: 0;
 }
 
 .logout-btn {
@@ -1101,4 +1112,5 @@ html[data-theme="light"] .gate-orb-c { background: #e2b4ea; opacity: 0.35; }
 @media (max-width: 860px) {
   .conn-status { display: none; }
   .help-btn { padding: 0 8px; }
+  .header-leave { padding: 0 10px; }
 }

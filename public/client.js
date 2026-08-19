@@ -677,6 +677,18 @@
     setSidebar(false);
   }
 
+  function showGate() {
+    document.body.classList.remove('in-session');
+    if (app) app.hidden = true;
+    if (gate) gate.hidden = false;
+  }
+
+  function showApp() {
+    document.body.classList.add('in-session');
+    if (gate) gate.hidden = true;
+    if (app) app.hidden = false;
+  }
+
   function logout(ev) {
     if (ev) {
       ev.preventDefault();
@@ -720,11 +732,9 @@
     if (usersEl) usersEl.innerHTML = '';
     document.querySelectorAll('.modal').forEach((m) => { m.hidden = true; });
     setSidebar(false);
-    if (app) app.hidden = true;
-    if (gate) gate.hidden = false;
+    showGate();
     const remembered = savedName();
     if (remembered && $('gateName')) $('gateName').value = remembered;
-    if ($('gateName')) $('gateName').focus();
     document.title = 'Agent · Live support';
     toast('You left the session');
   }
@@ -746,8 +756,7 @@
     try { sessionStorage.removeItem('agent.left'); } catch {}
     state.me = me;
     socket.emit('join', hostCode ? { ...me, hostCode } : me);
-    gate.hidden = true;
-    app.hidden = false;
+    showApp();
     msgInput.disabled = false;
     sendBtn.disabled = false;
     msgInput.focus();
@@ -1062,7 +1071,7 @@
   });
 
   socket.on('room-joined', ({ room, label, meta, messages, lastSeen }) => {
-    if (!state.joined) return;
+    if (state.left || !state.joined) return;
     state.room = room;
     state.roomLabel = label || room;
     state.roomMeta = meta || { type: 'public' };

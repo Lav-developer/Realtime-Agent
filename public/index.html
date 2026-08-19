@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=leave3" />
   </head>
   <body>
     <div id="gate" class="gate">
@@ -89,7 +89,7 @@
             </span>
             <span class="gear" aria-hidden="true">⚙</span>
           </button>
-          <button id="leaveBtn" class="leave-btn" type="button">Leave session</button>
+          <button id="leaveBtn" class="leave-btn" type="button" data-action="logout">Leave session</button>
         </div>
       </aside>
 
@@ -110,6 +110,7 @@
             <button id="searchToggle" class="icon-btn" type="button" title="Search this room" aria-label="Search messages">⌕</button>
             <button id="themeBtn" class="icon-btn" type="button" title="Toggle theme" aria-label="Toggle theme">◐</button>
             <button id="settingsBtn" class="icon-btn" type="button" title="Settings" aria-label="Settings">⚙</button>
+            <button id="headerLeaveBtn" class="leave-btn header-leave" type="button" data-action="logout">Leave</button>
           </div>
         </header>
 
@@ -209,7 +210,7 @@
             <button type="submit" class="btn">Save</button>
           </div>
         </form>
-        <button id="logoutBtn" class="btn danger logout-btn" type="button">Leave session</button>
+        <button id="logoutBtn" class="btn danger logout-btn" type="button" data-action="logout">Leave session</button>
       </div>
     </div>
 
@@ -236,6 +237,6 @@
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="client.js"></script>
+    <script src="client.js?v=leave3"></script>
   </body>
 </html>
