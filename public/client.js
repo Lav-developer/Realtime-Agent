@@ -88,6 +88,30 @@
     }
   }
 
+  function parseHelpText(text) {
+    const raw = String(text || '');
+    const lines = raw.replace(/^🆘\s*/, '').split('\n');
+    const title = (lines[0] || 'Help request').trim();
+    const catLine = lines.find((l) => /^Category:/i.test(l)) || '';
+    const category = catLine.replace(/^Category:\s*/i, '').trim() || 'General';
+    const blank = lines.findIndex((l, i) => i > 0 && l.trim() === '');
+    const body = blank >= 0 ? lines.slice(blank + 1).join('\n').trim() : '';
+    return { title, category, body };
+  }
+
+  function helpCard(info) {
+    return el(
+      'div',
+      { class: 'help-card' },
+      el('div', { class: 'help-card-kicker', text: 'Help request' }),
+      el('div', { class: 'help-card-title', text: info.title || 'Help request' }),
+      el('div', { class: 'help-card-meta' },
+        el('span', { class: 'help-tag', text: info.category || 'General' })
+      ),
+      info.body ? el('p', { class: 'help-card-body', text: info.body }) : null
+    );
+  }
+
   function canDeleteMessage(msg) {
     if (!state.me?.id || !msg?.user?.id) return false;
     if (String(msg.user.id) === String(state.me.id)) return true;
@@ -354,10 +378,10 @@
   function updateHeader() {
     const isDm = state.roomMeta?.type === 'dm' || String(state.room || '').startsWith('dm-');
     roomHash.textContent = isDm ? '✉' : '#';
-    roomTitle.textContent = (state.roomLabel || state.room || 'lobby').replace(/^#/, '');
-    if (isDm) roomSub.textContent = 'Private conversation';
+    roomTitle.textContent = (state.roomLabel || state.room || 'General').replace(/^#/, '');
+    if (isDm) roomSub.textContent = state.roomMeta?.help ? 'Help conversation' : 'Private conversation';
     else roomSub.textContent = state.roomMeta?.description || `${state.users.length} online`;
-    msgInput.placeholder = isDm ? `Message ${state.roomLabel || 'direct'}` : `Message #${(state.room || 'lobby').toLowerCase()}`;
+    msgInput.placeholder = isDm ? `Message ${state.roomLabel || 'direct'}` : `Message #${(state.room || 'General').toLowerCase()}`;
     const unread = [...state.public, ...state.dms.map((d) => ({ unread: d.unread }))].reduce((n, r) => n + (r.unread || 0), 0) + state.hiddenUnread;
     if (unread > 0 && document.hidden) {
       unreadBadge.hidden = false;
@@ -542,9 +566,14 @@
       );
     }
 
-    const body = renderRich(msg.text);
-    if (state.query) highlight(body, state.query);
-    bubble.appendChild(body);
+    const helpInfo = msg.help || (msg.type === 'help' ? parseHelpText(msg.text) : null);
+    if (helpInfo) {
+      bubble.appendChild(helpCard(helpInfo));
+    } else {
+      const body = renderRich(msg.text);
+      if (state.query) highlight(body, state.query);
+      bubble.appendChild(body);
+    }
 
     if (msg.attachments?.length) {
       const grid = el('div', { class: 'attach-grid' });
@@ -869,10 +898,17 @@
   }
   $('settingsBtn').addEventListener('click', openSettings);
   $('meCard').addEventListener('click', openSettings);
-  const logoutBtn = $('logoutBtn');
-  if (logoutBtn) logoutBtn.addEventListener('click', logout);
-  const leaveBtn = $('leaveBtn');
-  if (leaveBtn) leaveBtn.addEventListener('click', logout);
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('[data-action="logout"]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    logout(e);
+  });
+  ['logoutBtn', 'leaveBtn', 'headerLeaveBtn'].forEach((id) => {
+    const node = $(id);
+    if (node) node.addEventListener('click', logout);
+  });
   $('settingsForm').addEventListener('submit', (e) => {
     e.preventDefault();
     state.prefs.notif = $('setNotif').checked;

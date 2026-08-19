@@ -99,7 +99,7 @@
           <div class="chat-title">
             <div class="title-row">
               <span id="roomHash" class="hash">#</span>
-              <h2 id="roomTitle">lobby</h2>
+              <h2 id="roomTitle">General</h2>
               <span id="unreadBadge" class="unread-pill" hidden>0</span>
             </div>
             <p id="roomSub" class="room-sub">General conversation</p>
@@ -141,7 +141,7 @@
         <form id="composer" class="composer" autocomplete="off">
           <input id="fileInput" type="file" hidden accept="image/*,.pdf,.txt,.zip,.json" />
           <button id="attachBtn" class="icon-btn composer-icon" type="button" title="Attach a file" aria-label="Attach file">＋</button>
-          <textarea id="msgInput" rows="1" placeholder="Message #lobby" disabled></textarea>
+          <textarea id="msgInput" rows="1" placeholder="Message #general" disabled></textarea>
           <button id="emojiToggle" class="icon-btn composer-icon" type="button" title="Emoji" aria-label="Insert emoji">☺</button>
           <button id="sendBtn" class="send-btn" type="submit" disabled>Send</button>
         </form>
@@ -237,6 +237,6 @@
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="client.js?v=perm1"></script>
+    <script src="client.js?v=ui4"></script>
   </body>
 </html>

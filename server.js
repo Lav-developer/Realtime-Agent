@@ -67,6 +67,15 @@ function createRuntime(options = {}) {
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.use('/uploads', express.static(uploadsDir, { maxAge: '1h', fallthrough: false }));
 
+  app.get('/download/:name', (req, res) => {
+    const name = path.basename(String(req.params.name || ''));
+    if (!name || name.includes('..')) return res.status(400).json({ error: 'Invalid file' });
+    const filePath = path.join(uploadsDir, name);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    const downloadName = String(req.query.name || name).replace(/[/\\]/g, '').slice(0, 120) || name;
+    res.download(filePath, downloadName);
+  });
+
   const upload = multer({
     storage: multer.diskStorage({
       destination: (_req, _file, cb) => cb(null, uploadsDir),
@@ -537,6 +546,7 @@ function createRuntime(options = {}) {
       replyTo: null,
       attachments: Array.isArray(item.attachments) ? item.attachments.map(normalizeAttachment).filter(Boolean).slice(0, 2) : [],
       type: 'help',
+      help: { title, category: cat, body },
       delivered: true,
       readBy: [],
     };
