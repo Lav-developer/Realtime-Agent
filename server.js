@@ -571,7 +571,13 @@ function createRuntime(options = {}) {
         const color = typeof payload.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(payload.color)
           ? payload.color
           : colorFromId(id);
-        const preferredRoom = sanitizeRoom(payload.room) || 'General';
+        // A persisted/current DM name may be longer than a public channel name.
+        // Preserve an exact known room for reconnects; only sanitize a prospective
+        // public-channel label.
+        const requestedRoom = typeof payload.room === 'string' ? payload.room : '';
+        const preferredRoom = roomsMeta.has(requestedRoom)
+          ? requestedRoom
+          : (sanitizeRoom(requestedRoom) || 'General');
 
         let role = 'user';
         if (hostIds.has(id)) role = 'host';
@@ -668,8 +674,11 @@ function createRuntime(options = {}) {
     socket.on('join-room', (roomName) => {
       const user = sockets.get(socket.id);
       if (!user) return;
-      const room = sanitizeRoom(roomName) || String(roomName || '');
-      if (!room) return;
+      // DM names are derived from two opaque user IDs and are deliberately longer
+      // than public channel names. Sanitizing them with MAX_ROOM truncated valid
+      // help DMs (and made the advertised room impossible to rejoin).
+      const room = typeof roomName === 'string' ? roomName : '';
+      if (!room || room.length > 200) return;
       const meta = roomsMeta.get(room);
       if (!meta) {
         socket.emit('error-message', { message: 'Room not found' });

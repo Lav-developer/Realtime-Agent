@@ -462,8 +462,11 @@
     return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 96;
   }
 
-  function scrollToBottom(force) {
-    if (force || state.stickBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+  function scrollToBottom(force, smooth = false) {
+    if (!force && !state.stickBottom) return;
+    const top = messagesEl.scrollHeight;
+    if (smooth && typeof messagesEl.scrollTo === 'function') messagesEl.scrollTo({ top, behavior: 'smooth' });
+    else messagesEl.scrollTop = top;
   }
 
   messagesEl.addEventListener('scroll', () => {
@@ -474,7 +477,7 @@
   jumpLatest.addEventListener('click', () => {
     state.stickBottom = true;
     jumpLatest.hidden = true;
-    scrollToBottom(true);
+    scrollToBottom(true, true);
   });
 
   function shouldGroup(prev, curr) {
@@ -484,7 +487,11 @@
     return curr.ts - prev.ts < 5 * 60 * 1000;
   }
 
-  function renderMessages() {
+  function renderMessages({ forceBottom = false } = {}) {
+    // Rendering replaces the list DOM. Keep an older reader anchored instead of
+    // treating every re-render as a new-message event.
+    const wasNearBottom = nearBottom();
+    const previousTop = messagesEl.scrollTop;
     const q = state.query.trim().toLowerCase();
     const list = q
       ? state.messages.filter((m) => `${m.text} ${m.user?.name || ''}`.toLowerCase().includes(q))
@@ -533,7 +540,13 @@
       }
       messagesEl.appendChild(messageRow(msg, shouldGroup(prev, msg)));
     });
-    scrollToBottom();
+    if (forceBottom || wasNearBottom) {
+      state.stickBottom = true;
+      scrollToBottom(true);
+    } else {
+      state.stickBottom = false;
+      messagesEl.scrollTop = previousTop;
+    }
   }
 
   function messageRow(msg, grouped) {
@@ -1137,7 +1150,7 @@
     state.lastSeen = Number(lastSeen) || 0;
     state.stickBottom = true;
     jumpLatest.hidden = true;
-    renderMessages();
+    renderMessages({ forceBottom: true });
     renderNav();
     updateHeader();
     socket.emit('mark-read', room);
@@ -1149,6 +1162,9 @@
     if (!msg || !msg.id) return;
     if (state.messages.some((m) => m.id === msg.id)) return;
     if (msg.room === state.room) {
+      // Measure before appending: after a row is added, a reader who was at the
+      // bottom no longer appears "near" it.
+      const wasNearBottom = nearBottom();
       state.messages.push(msg);
       if (state.query) {
         renderMessages();
@@ -1162,8 +1178,10 @@
         const row = messageRow(msg, shouldGroup(last, msg));
         row.classList.add('fresh');
         messagesEl.appendChild(row);
-        if (nearBottom() || msg.user?.id === state.me?.id) scrollToBottom(true);
-        else {
+        if (wasNearBottom || msg.user?.id === state.me?.id) {
+          state.stickBottom = true;
+          scrollToBottom(true);
+        } else {
           jumpLatest.hidden = false;
           state.stickBottom = false;
         }

@@ -20,7 +20,7 @@ function uid(prefix) {
 function connect(name, extra = {}) {
   return new Promise((resolve, reject) => {
     const socket = io(`http://127.0.0.1:${port}`, { transports: ['websocket'], reconnection: false });
-    const bag = { socket, events: [], messages: [], typing: [], rooms: [], errors: [], presence: [], session: null };
+    const bag = { socket, events: [], messages: [], typing: [], rooms: [], errors: [], presence: [], session: null, workspace: null, invites: [] };
     const timer = setTimeout(() => reject(new Error(`timeout connecting ${name}`)), 4000);
     socket.on('connect_error', reject);
     socket.on('error-message', (e) => bag.errors.push(e.message));
@@ -29,6 +29,8 @@ function connect(name, extra = {}) {
     socket.on('room-joined', (r) => bag.rooms.push(r.room));
     socket.on('presence', (p) => bag.presence.push(p));
     socket.on('session', (s) => { bag.session = s; });
+    socket.on('workspace', (w) => { bag.workspace = w; });
+    socket.on('dm-invite', (invite) => bag.invites.push(invite));
     socket.on('joined', (user) => {
       bag.user = user;
       clearTimeout(timer);
@@ -158,6 +160,66 @@ test('unauthorized user cannot join a DM', async () => {
   a.socket.close();
   b.socket.close();
   eve.socket.close();
+});
+
+test('help DM has private membership, supports long IDs, and survives reconnect', async () => {
+  // Earlier tests intentionally use a reconnect grace period; start with no host.
+  await new Promise((resolve) => setTimeout(resolve, 3700));
+  // The shared test server retains a short reconnect grace window. Clear stale
+  // test-only presence entries before establishing this exact host/user pair.
+  runtime.internals.online.clear();
+  // Browser UUIDs create a 77-character DM name, which must never be truncated
+  // by the public-channel sanitizer on join-room.
+  const hostId = `host_${'h'.repeat(55)}`;
+  const userId = `user_${'u'.repeat(55)}`;
+  const host = await connect('HelpHost', { id: hostId, hostCode: HOST_CODE });
+  assert.equal(host.user.role, 'host');
+  const user = await connect('HelpUser', { id: userId });
+  user.socket.emit('request-help', { title: 'Cannot build', category: 'Coding', description: 'A private detail' });
+  const dm = await waitFor(() => [...runtime.internals.roomsMeta.entries()]
+    .find(([name, meta]) => meta.help && meta.members.includes(hostId) && meta.members.includes(userId))?.[0], 4000);
+  assert.ok(dm.length > 40);
+  assert.deepEqual(runtime.internals.roomsMeta.get(dm).members.sort(), [hostId, userId].sort());
+  await waitFor(() => host.workspace?.dms.some((d) => d.room === dm));
+  host.socket.emit('join-room', dm);
+  await waitFor(() => host.rooms.includes(dm));
+  user.socket.emit('join-room', dm);
+  await waitFor(() => user.rooms.includes(dm));
+  host.socket.emit('message', { room: dm, text: 'I can help.' });
+  await waitFor(() => user.messages.some((m) => m.room === dm && m.text === 'I can help.'));
+
+  const outsider = await connect('HelpOutsider');
+  outsider.socket.emit('join-room', dm);
+  await waitFor(() => outsider.errors.includes('Room not found'));
+  assert.equal(outsider.rooms.includes(dm), false);
+
+  host.socket.close();
+  const reconnectedHost = await connect('HelpHost', { id: hostId, room: dm });
+  await waitFor(() => reconnectedHost.rooms.includes(dm));
+  reconnectedHost.socket.emit('message', { room: dm, text: 'Still private.' });
+  await waitFor(() => user.messages.some((m) => m.text === 'Still private.'));
+  user.socket.close();
+  outsider.socket.close();
+  reconnectedHost.socket.close();
+});
+
+test('help request is queued while host is offline and becomes an actionable DM', async () => {
+  // Disconnect grace is intentional for reconnects; wait for it to expire so no
+  // host from the preceding test can service this request.
+  await new Promise((resolve) => setTimeout(resolve, 3700));
+  runtime.internals.online.clear();
+  const user = await connect('QueuedUser');
+  user.socket.emit('request-help', { title: 'Weekend question', category: 'General' });
+  await waitFor(() => runtime.internals.pendingHelp.some((item) => item.userId === user.user.id));
+  assert.equal([...runtime.internals.roomsMeta.values()].some((meta) => meta.help && meta.members.includes(user.user.id)), false);
+  const host = await connect('QueuedHost', { hostCode: HOST_CODE });
+  const dm = await waitFor(() => [...runtime.internals.roomsMeta.entries()]
+    .find(([name, meta]) => meta.help && meta.members.includes(user.user.id) && meta.members.includes(host.user.id))?.[0]);
+  await waitFor(() => host.workspace?.dms.some((d) => d.room === dm));
+  host.socket.emit('join-room', dm);
+  await waitFor(() => host.rooms.includes(dm));
+  user.socket.close();
+  host.socket.close();
 });
 
 test('reconnect restores the session', async () => {
